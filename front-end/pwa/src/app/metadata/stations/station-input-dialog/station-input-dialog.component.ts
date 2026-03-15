@@ -20,6 +20,7 @@ export class StationInputDialogComponent {
   protected open: boolean = false;
   protected title!: string;
   protected station!: CreateStationModel;
+  protected editingStationId: string | null = null;
 
   constructor(
     private stationsCacheService: StationsCacheService,
@@ -28,6 +29,7 @@ export class StationInputDialogComponent {
 
   public showDialog(stationId?: string): void {
     this.open = true;
+    this.editingStationId = stationId ?? null;
     if (stationId) {
       this.title = "Edit Station";
       this.stationsCacheService.findOne(stationId).pipe(
@@ -147,11 +149,11 @@ export class StationInputDialogComponent {
       dateEstablished: dateEstablished || undefined,
       dateClosed: dateClosed || undefined,
       comment: this.station.comment || undefined,
-    }
+    };
 
     let saveSubscription: Observable<CreateStationModel>;
-    if (this.station.id) {
-      saveSubscription = this.stationsCacheService.update(this.station.id, updateStation);
+    if (this.editingStationId) {
+      saveSubscription = this.stationsCacheService.update(this.editingStationId, updateStation);
     } else {
       saveSubscription = this.stationsCacheService.create({ ...updateStation, id: this.station.id });
     }
@@ -160,7 +162,11 @@ export class StationInputDialogComponent {
       take(1)
     ).subscribe({
       next: (data) => {
-        this.pagesDataService.showToast({ title: 'Station Characteristics', message: this.station.id ? 'New Station Created' : 'Station Updated', type: ToastEventTypeEnum.SUCCESS });
+        this.pagesDataService.showToast({
+          title: 'Station Characteristics',
+          message: this.editingStationId ? 'Station Updated' : 'New Station Created',
+          type: ToastEventTypeEnum.SUCCESS
+        });
         this.open = false;
         this.stationsCacheService.checkForUpdates();
         this.ok.emit();

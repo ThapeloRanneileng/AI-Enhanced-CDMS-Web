@@ -2,7 +2,7 @@
     (cancelClick)="onCancelClick()">
     <div *ngIf="station && open">
         <div>
-            <app-text-input [label]="'Id'" [(value)]="station.id" />
+            <app-text-input [label]="'Id'" [(value)]="station.id" [readonly]="editingStationId !== null" />
         </div>
 
         <hr />
