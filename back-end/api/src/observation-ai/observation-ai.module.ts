@@ -7,10 +7,17 @@ import { AnomalyModelRegistryService } from './services/anomaly-model-registry.s
 import { ObservationAnomalyDetectionService } from './services/observation-anomaly-detection.service';
 import { ObservationAnomalyAssessmentService } from './services/observation-anomaly-assessment.service';
 import { ObservationAnomalyJobService } from './services/observation-anomaly-job.service';
+import { ObservationAnomalyAssessmentsQueryService } from './services/observation-anomaly-assessments-query.service';
+import { ObservationAnomalyAssessmentsController } from './controllers/observation-anomaly-assessments.controller';
+import { UserModule } from 'src/user/user.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ObservationEntity, ObservationAnomalyAssessmentEntity]),
+    UserModule,
+  ],
+  controllers: [
+    ObservationAnomalyAssessmentsController,
   ],
   providers: [
     AnomalyFeatureBuilderService,
@@ -18,12 +25,14 @@ import { ObservationAnomalyJobService } from './services/observation-anomaly-job
     ObservationAnomalyDetectionService,
     ObservationAnomalyAssessmentService,
     ObservationAnomalyJobService,
+    ObservationAnomalyAssessmentsQueryService,
   ],
   exports: [
     AnomalyFeatureBuilderService,
     AnomalyModelRegistryService,
     ObservationAnomalyDetectionService,
     ObservationAnomalyAssessmentService,
+    ObservationAnomalyAssessmentsQueryService,
   ]
 })
 export class ObservationAiModule { }
