@@ -26,6 +26,10 @@
                         <button class="nav-link" [class.active]="activeTab === 'qctests'"
                             (click)="onTabChange('qctests')">QC Tests</button>
                     </li>
+                    <li class="nav-item">
+                        <button class="nav-link" [class.active]="activeTab === 'aiAnomaly'"
+                            (click)="onTabChange('aiAnomaly')">AI Anomaly</button>
+                    </li>
                 </ul>
             </div>
 
@@ -122,6 +126,61 @@
                                 <tr *ngFor="let row of viewQCTestLog">
                                     <td>{{ row.name }}</td>
                                     <td>{{ row.qcStatus }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div *ngIf="activeTab === 'aiAnomaly'" class="p-3">
+                    <div *ngIf="isAnomalyAssessmentLoading" class="text-muted">
+                        Loading AI anomaly assessment...
+                    </div>
+                    <div *ngIf="anomalyAssessmentErrorMessage" class="text-danger">
+                        {{ anomalyAssessmentErrorMessage }}
+                    </div>
+                    <div *ngIf="!isAnomalyAssessmentLoading && !anomalyAssessmentErrorMessage && !observationAnomalyAssessment"
+                        class="text-muted">
+                        No AI anomaly assessment found.
+                    </div>
+                    <div *ngIf="observationAnomalyAssessment">
+                        <table class="table table-striped table-hover mb-0">
+                            <tbody>
+                                <tr>
+                                    <th>Score</th>
+                                    <td>{{ formatAnomalyScore(observationAnomalyAssessment.anomalyScore) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Severity</th>
+                                    <td>{{ formatAnomalyAssessmentOption(observationAnomalyAssessment.severity) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Outcome</th>
+                                    <td>{{ formatAnomalyAssessmentOption(observationAnomalyAssessment.outcome) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Model</th>
+                                    <td>{{ observationAnomalyAssessment.modelId }} / {{ observationAnomalyAssessment.modelVersion }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Assessment Type</th>
+                                    <td>{{ formatAnomalyAssessmentOption(observationAnomalyAssessment.assessmentType) }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Created</th>
+                                    <td>{{ formattedAnomalyAssessmentCreatedAt }}</td>
+                                </tr>
+                                <tr>
+                                    <th>Reasons</th>
+                                    <td>
+                                        <div *ngIf="observationAnomalyAssessment.reasons.length === 0" class="text-muted">
+                                            No reasons recorded.
+                                        </div>
+                                        <div *ngFor="let reason of observationAnomalyAssessment.reasons" class="d-flex flex-row">
+                                            <div><i class="bi bi-arrow-right-short"></i></div>
+                                            <div>{{ reason }}</div>
+                                        </div>
+                                    </td>
                                 </tr>
                             </tbody>
                         </table>

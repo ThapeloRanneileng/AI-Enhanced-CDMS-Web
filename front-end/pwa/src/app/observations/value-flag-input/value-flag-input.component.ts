@@ -12,6 +12,10 @@ import { FormEntryDefinition } from 'src/app/data-ingestion/data-entry/form-entr
 import { ObservationEntry } from '../models/observation-entry.model';
 import { ElementCacheModel } from 'src/app/metadata/elements/services/elements-cache.service';
 import { QCTestCacheModel } from 'src/app/metadata/qc-tests/services/qc-specifications-cache.service';
+import { ObservationAnomalyAssessmentsService } from 'src/app/quality-control/services/observation-anomaly-assessments.service';
+import { ViewObservationAnomalyAssessmentModel } from 'src/app/quality-control/models/view-observation-anomaly-assessment.model';
+import { take } from 'rxjs';
+import { NumberUtils } from 'src/app/shared/utils/number.utils';
 
 /**
  * Component for data entry of observations
@@ -59,12 +63,15 @@ export class ValueFlagInputComponent implements OnChanges {
 
   @Output() public enterKeyPress = new EventEmitter<void>();
 
-  protected activeTab: 'new' | 'history' | 'qctests' = 'new';
+  protected activeTab: 'new' | 'history' | 'qctests' | 'aiAnomaly' = 'new';
   protected displayExtraInfoDialog: boolean = false;
   protected duplicateObservation: ViewObservationModel | undefined;
   protected viewObservationLog!: ViewObservationLogModel[];
   protected duplicateObservationLog!: ViewObservationLogModel[];
   protected viewQCTestLog!: ViewQCTestLog[];
+  protected observationAnomalyAssessment: ViewObservationAnomalyAssessmentModel | null = null;
+  protected isAnomalyAssessmentLoading: boolean = false;
+  protected anomalyAssessmentErrorMessage: string = '';
   protected comment: string = '';
 
 
@@ -82,7 +89,10 @@ export class ValueFlagInputComponent implements OnChanges {
   private element!: ElementCacheModel;
   private rangeThresholdToUse: RangeThreshold | undefined;
 
-  constructor(private cachedMetadataService: CachedMetadataService) { }
+  constructor(
+    private cachedMetadataService: CachedMetadataService,
+    private observationAnomalyAssessmentsService: ObservationAnomalyAssessmentsService,
+  ) { }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['observationEntry'] && this.observationEntry) {
@@ -92,6 +102,9 @@ export class ValueFlagInputComponent implements OnChanges {
       // set original database values for future comparison
       this.originalValues = `${this.valueFlagInput}-${this.comment}`;
       this.rangeThresholdToUse = this.getRangeThresholdToUse();
+      this.observationAnomalyAssessment = null;
+      this.isAnomalyAssessmentLoading = false;
+      this.anomalyAssessmentErrorMessage = '';
     }
 
     if (changes['duplicateObservations'] && this.duplicateObservations && this.observationEntry) {
@@ -193,7 +206,7 @@ export class ValueFlagInputComponent implements OnChanges {
     this.displayExtraInfoDialog = true;
   }
 
-  protected onTabChange(selectedTab: 'new' | 'history' | 'qctests'): void {
+  protected onTabChange(selectedTab: 'new' | 'history' | 'qctests' | 'aiAnomaly'): void {
     this.activeTab = selectedTab;
     switch (this.activeTab) {
       case 'history':
@@ -217,10 +230,61 @@ export class ValueFlagInputComponent implements OnChanges {
           }
         }
         break;
+      case 'aiAnomaly':
+        this.loadObservationAnomalyAssessment();
+        break;
       default:
         break;
     }
 
+  }
+
+  private loadObservationAnomalyAssessment(): void {
+    if (this.observationAnomalyAssessment || this.isAnomalyAssessmentLoading) {
+      return;
+    }
+
+    this.isAnomalyAssessmentLoading = true;
+    this.anomalyAssessmentErrorMessage = '';
+
+    this.observationAnomalyAssessmentsService.find({
+      stationIds: [this.observationEntry.observation.stationId],
+      elementIds: [this.observationEntry.observation.elementId],
+      level: this.observationEntry.observation.level,
+      intervals: [this.observationEntry.observation.interval],
+      sourceIds: [this.observationEntry.observation.sourceId],
+      fromDate: this.observationEntry.observation.datetime,
+      toDate: this.observationEntry.observation.datetime,
+      page: 1,
+      pageSize: 1,
+    }).pipe(
+      take(1),
+    ).subscribe({
+      next: data => {
+        this.isAnomalyAssessmentLoading = false;
+        this.observationAnomalyAssessment = data.length > 0 ? data[0] : null;
+      },
+      error: err => {
+        this.isAnomalyAssessmentLoading = false;
+        this.anomalyAssessmentErrorMessage = err;
+      }
+    });
+  }
+
+  protected formatAnomalyAssessmentOption(option: string | null): string {
+    return StringUtils.formatEnumForDisplay(option);
+  }
+
+  protected formatAnomalyScore(score: number): number {
+    return NumberUtils.roundOff(score, 3);
+  }
+
+  protected get formattedAnomalyAssessmentCreatedAt(): string {
+    if (!this.observationAnomalyAssessment) {
+      return '';
+    }
+
+    return DateUtils.getPresentableDatetime(this.observationAnomalyAssessment.createdAt, this.cachedMetadataService.utcOffSet);
   }
 
   protected onExtraInfoOkClicked(): void {
