@@ -22,6 +22,7 @@ import { ViewUserDto } from 'src/user/dtos/view-user.dto';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { DataAvailabilityDetailsQueryDto } from '../dtos/data-availability-details-query.dto';
 import { DataAvailaibilityDetailsDto } from '../dtos/data-availability-details.dto';
+import { ObservationEventUtils } from '../events/observations-saved.event';
 
 @Injectable()
 export class ObservationsService {
@@ -285,7 +286,9 @@ export class ObservationsService {
         }
         this.logger.log(`Saving entities from user - ${userId}, took: ${(Date.now() - startTime)} milliseconds`);
 
-        this.eventEmitter.emit('observations.saved');
+        this.eventEmitter.emit('observations.saved', {
+            observationKeys: ObservationEventUtils.deduplicateObservationKeys(obsEntities.map(obs => ObservationEventUtils.mapEntityKey(obs)))
+        });
 
     }
 

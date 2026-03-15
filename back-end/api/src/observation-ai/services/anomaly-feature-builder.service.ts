@@ -39,21 +39,4 @@ export class AnomalyFeatureBuilderService {
       }
     };
   }
-
-  public async findObservationKeysForRecentIngestion(limit = 100): Promise<Pick<ObservationEntity, "stationId" | "elementId" | "level" | "datetime" | "interval" | "sourceId">[]> {
-    return this.observationRepo.find({
-      select: {
-        stationId: true,
-        elementId: true,
-        level: true,
-        datetime: true,
-        interval: true,
-        sourceId: true,
-      },
-      order: {
-        entryDateTime: "DESC",
-      },
-      take: limit,
-    });
-  }
 }

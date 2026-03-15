@@ -14,6 +14,7 @@ import { TabularImportTransformer } from './tabular-import-transformer';
 import { PreviewError } from '../dtos/import-preview.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DuckDBUtils } from 'src/shared/utils/duckdb.utils';
+import { ObservationPrimaryKey } from '../events/observations-saved.event';
 
 @Injectable()
 export class ObservationImportService {
@@ -166,12 +167,32 @@ export class ObservationImportService {
 
             await queryRunner.query(upsertQuery);
 
+            const savedObservationKeys: ObservationPrimaryKey[] = await queryRunner.query(`
+                    SELECT DISTINCT
+                        ${TabularImportTransformer.STATION_ID_PROPERTY_NAME} AS "stationId",
+                        ${TabularImportTransformer.ELEMENT_ID_PROPERTY_NAME} AS "elementId",
+                        ${TabularImportTransformer.LEVEL_PROPERTY_NAME} AS "level",
+                        ${TabularImportTransformer.DATE_TIME_PROPERTY_NAME} AS "datetime",
+                        ${TabularImportTransformer.INTERVAL_PROPERTY_NAME} AS "interval",
+                        ${TabularImportTransformer.SOURCE_ID_PROPERTY_NAME} AS "sourceId"
+                    FROM ${stagingTableName};
+                `);
+
             // Step 4: Commit transaction - staging table is automatically dropped (ON COMMIT DROP)
             await queryRunner.commitTransaction();
 
             this.logger.log(`Successfully imported ${filePathName} into database`);
 
-            this.eventEmitter.emit('observations.saved');
+            this.eventEmitter.emit('observations.saved', {
+                observationKeys: savedObservationKeys.map((row) => ({
+                    stationId: row.stationId,
+                    elementId: Number(row.elementId),
+                    level: Number(row.level),
+                    datetime: new Date(row.datetime),
+                    interval: Number(row.interval),
+                    sourceId: Number(row.sourceId),
+                }))
+            });
 
         } catch (error) {
             // Rollback transaction on error

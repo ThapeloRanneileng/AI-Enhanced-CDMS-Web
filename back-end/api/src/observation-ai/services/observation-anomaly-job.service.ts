@@ -1,25 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ObservationAnomalyAssessmentTypeEnum } from '../entities/observation-anomaly-assessment.entity';
-import { AnomalyFeatureBuilderService } from './anomaly-feature-builder.service';
 import { ObservationAnomalyAssessmentService } from './observation-anomaly-assessment.service';
+import { ObservationsSavedEvent } from 'src/observation/events/observations-saved.event';
 
 @Injectable()
 export class ObservationAnomalyJobService {
   private readonly logger = new Logger(ObservationAnomalyJobService.name);
 
   constructor(
-    private featureBuilderService: AnomalyFeatureBuilderService,
     private observationAnomalyAssessmentService: ObservationAnomalyAssessmentService,
   ) { }
 
   @OnEvent('observations.saved')
-  async handleObservationsSaved() {
-    this.logger.log('Received observations.saved event for AI anomaly assessment');
+  async handleObservationsSaved(event: ObservationsSavedEvent) {
+    const observationKeys = event?.observationKeys ?? [];
+    this.logger.log(`Received observations.saved event for ${observationKeys.length} observation(s)`);
 
-    // Placeholder event handling until the save flow emits explicit observation keys.
-    const recentKeys = await this.featureBuilderService.findObservationKeysForRecentIngestion(25);
-    for (const key of recentKeys) {
+    for (const key of observationKeys) {
       await this.observationAnomalyAssessmentService.assessObservationByKey(key, ObservationAnomalyAssessmentTypeEnum.INGESTION);
     }
   }

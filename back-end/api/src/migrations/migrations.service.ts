@@ -16,10 +16,11 @@ import { QCTestTypeEnum } from 'src/metadata/qc-specifications/entities/qc-test-
 import { RangeThresholdQCTestParamsDto } from 'src/metadata/qc-specifications/dtos/qc-test-parameters/range-qc-test-params.dto';
 import { GeneralSettingParameters } from 'src/settings/dtos/update-general-setting-params.dto';
 import { ViewGeneralSettingModel } from 'src/settings/dtos/view-general-setting.model';
+import { DataSource } from 'typeorm';
 
 @Injectable()
 export class MigrationsService {
-  private readonly SUPPORTED_DB_VERSION: string = '0.0.4'; // TODO. Should come from a versioning file. 
+  private readonly SUPPORTED_DB_VERSION: string = '0.0.5'; // TODO. Should come from a versioning file. 
   private readonly logger = new Logger(MigrationsService.name);
 
   constructor(
@@ -32,6 +33,7 @@ export class MigrationsService {
     private stationObsFocusesService: StationObsFocusesService,
     private generalSettingsService: GeneralSettingsService,
     private qcTestsService: QCSpecificationsService, // TODO. Temporary. After all met services have version preview 2.0.5. Remove this. New installations won't need it
+    private dataSource: DataSource,
 
   ) { }
 
@@ -89,6 +91,7 @@ export class MigrationsService {
     await this.seedFirstUser();
     await this.seedMetadata();
     await this.seedGeneralSettings();
+    await this.createObservationAnomalyAssessmentsTable();
   }
 
   private async seedTriggers() {
@@ -183,6 +186,74 @@ export class MigrationsService {
         this.logger.log(`Range threshold updated -  ${qc.id} - ${qc.name}`)
       }
     }
+  }
+
+  private async createObservationAnomalyAssessmentsTable() {
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'observation_anomaly_assessments_assessment_type_enum') THEN
+          CREATE TYPE observation_anomaly_assessments_assessment_type_enum AS ENUM ('ingestion', 'on_demand_qc', 'recheck', 'backfill');
+        END IF;
+      END $$;
+    `);
+
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'observation_anomaly_assessments_severity_enum') THEN
+          CREATE TYPE observation_anomaly_assessments_severity_enum AS ENUM ('low', 'medium', 'high');
+        END IF;
+      END $$;
+    `);
+
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'observation_anomaly_assessments_outcome_enum') THEN
+          CREATE TYPE observation_anomaly_assessments_outcome_enum AS ENUM ('passed', 'suspect', 'failed', 'not_applicable');
+        END IF;
+      END $$;
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS observation_anomaly_assessments (
+        id SERIAL PRIMARY KEY,
+        station_id VARCHAR NOT NULL,
+        element_id INT NOT NULL,
+        level INT NOT NULL,
+        date_time TIMESTAMPTZ NOT NULL,
+        interval INT NOT NULL,
+        source_id INT NOT NULL,
+        assessment_type observation_anomaly_assessments_assessment_type_enum NOT NULL,
+        model_id VARCHAR NOT NULL,
+        model_version VARCHAR NOT NULL,
+        anomaly_score DOUBLE PRECISION NOT NULL,
+        severity observation_anomaly_assessments_severity_enum NOT NULL,
+        outcome observation_anomaly_assessments_outcome_enum NOT NULL,
+        reasons JSONB NULL,
+        feature_snapshot JSONB NULL,
+        created_by_user_id INT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_station_id" ON observation_anomaly_assessments (station_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_element_id" ON observation_anomaly_assessments (element_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_level" ON observation_anomaly_assessments (level);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_date_time" ON observation_anomaly_assessments (date_time);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_interval" ON observation_anomaly_assessments (interval);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_source_id" ON observation_anomaly_assessments (source_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_assessment_type" ON observation_anomaly_assessments (assessment_type);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_outcome" ON observation_anomaly_assessments (outcome);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_created_by_user_id" ON observation_anomaly_assessments (created_by_user_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_created_at" ON observation_anomaly_assessments (created_at);`);
+    await this.dataSource.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_lookup"
+      ON observation_anomaly_assessments (station_id, element_id, level, date_time, interval, source_id);
+    `);
+
+    this.logger.log('observation anomaly assessments table ensured');
   }
 
 }
