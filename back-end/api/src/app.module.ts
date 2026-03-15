@@ -11,6 +11,7 @@ import { QueueModule } from './queue/queue.module';
 import { AppConfig } from './app.config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ObservationAiModule } from './observation-ai/observation-ai.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     UserModule,
     MetadataModule,
     ObservationModule,
+    ObservationAiModule,
     SettingsModule,
     MigrationsModule,
     QueueModule,
