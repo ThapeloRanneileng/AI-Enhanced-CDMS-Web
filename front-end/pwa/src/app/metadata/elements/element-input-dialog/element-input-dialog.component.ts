@@ -17,12 +17,15 @@ export class ElementInputDialogComponent {
   protected open!: boolean;
   protected title: string = '';
   protected element!: CreateViewElementModel;
+  protected editingElementId: number | null = null;
 
   constructor(
     private elementsCacheService: ElementsCacheService,
     private pagesDataService: PagesDataService) { }
 
   public showDialog(elementId?: number): void {
+    this.editingElementId = elementId ?? null;
+
     if (elementId) {
       this.title = "Edit Element";
       this.elementsCacheService.findOne(elementId).pipe(
@@ -91,10 +94,10 @@ export class ElementInputDialogComponent {
     }
 
     let saveSubscription: Observable<CreateViewElementModel>;
-    if (this.element.id === 0) {
+    if (this.editingElementId === null) {
       saveSubscription = this.elementsCacheService.add({ ...updatedElement, id: this.element.id });
     } else {
-      saveSubscription = this.elementsCacheService.update(this.element.id, updatedElement);
+      saveSubscription = this.elementsCacheService.update(this.editingElementId, updatedElement);
     }
 
     saveSubscription.pipe(
@@ -103,7 +106,7 @@ export class ElementInputDialogComponent {
       let message: string;
       let messageType: ToastEventTypeEnum;
       if (data) {
-        message = this.element.id === 0 ? `${data.name} created` : `${data.name} updated`;
+        message = this.editingElementId === null ? `${data.name} created` : `${data.name} updated`;
         messageType = ToastEventTypeEnum.SUCCESS;
       } else {
         message = "Error in saving element";
