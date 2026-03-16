@@ -38,6 +38,7 @@ export enum UserAppStateEnum {
   USER_PROFILE = "user_profile",
   DATA_ENTRY_STATION_SELECTION = "data_entry_station_selection",
   ENTRY_FORM_SETTINGS = "form_settings", 
+  OBSERVATION_ANOMALY_REVIEWS = "observation_anomaly_reviews",
 }
 
 export interface AppComponentState {
@@ -145,4 +146,3 @@ export class AppDatabase extends Dexie {
     }
 
 }
-

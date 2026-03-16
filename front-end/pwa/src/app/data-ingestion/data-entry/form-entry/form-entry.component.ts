@@ -29,6 +29,20 @@ import { ObservationAnomalyAssessmentsService } from 'src/app/quality-control/se
 import { ViewObservationAnomalyAssessmentModel } from 'src/app/quality-control/models/view-observation-anomaly-assessment.model';
 import { NumberUtils } from 'src/app/shared/utils/number.utils';
 
+type ObservationAnomalyReviewStatus = 'accepted' | 'overridden' | 'needs_investigation';
+
+interface ObservationAnomalyReviewModel {
+  observationKey: string;
+  status: ObservationAnomalyReviewStatus;
+  reviewedAt: string;
+  reviewedByEmail?: string;
+  assessmentId?: number;
+}
+
+interface ObservationAnomalyReviewState {
+  reviews: Record<string, ObservationAnomalyReviewModel>;
+}
+
 export interface UserFormSettingStruct {
   displayExtraInformationOption: boolean,
   incrementDateSelector: boolean;
@@ -119,6 +133,10 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected selectedObservationAnomalyAssessment: ViewObservationAnomalyAssessmentModel | null = null;
   protected isSelectedObservationAnomalyLoading: boolean = false;
   protected selectedObservationAnomalyErrorMessage: string = '';
+  protected selectedObservationReview: ObservationAnomalyReviewModel | null = null;
+  protected isSavingSelectedObservationReview: boolean = false;
+
+  private currentUserEmail: string = '';
 
   private destroy$ = new Subject<void>();
 
@@ -139,6 +157,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       takeUntil(this.destroy$),
     ).subscribe(user => {
       if (!user) return;
+      this.currentUserEmail = user.email;
       this.pagesDataService.showToast({ title: 'Data Entry', message: `You are currently logged in as ${user.email}`, type: ToastEventTypeEnum.WARNING, timeout: 6000 });
     });
 
@@ -220,6 +239,8 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     this.selectedObservationAnomalyAssessment = null;
     this.isSelectedObservationAnomalyLoading = false;
     this.selectedObservationAnomalyErrorMessage = '';
+    this.selectedObservationReview = null;
+    this.isSavingSelectedObservationReview = false;
 
     const entryFormObsQuery: EntryFormObservationQueryModel = this.formDefinitions.createObservationQuery();
     this.observationService.findEntryFormData(entryFormObsQuery).pipe(
@@ -558,10 +579,14 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   }
 
   protected onGridCellSelected(observationEntry: ObservationEntry): void {
+    const observationKey = this.getObservationReviewKey(observationEntry);
     this.selectedGridObservation = observationEntry;
     this.selectedObservationAnomalyAssessment = null;
     this.isSelectedObservationAnomalyLoading = true;
     this.selectedObservationAnomalyErrorMessage = '';
+    this.selectedObservationReview = null;
+
+    void this.loadSelectedObservationReview(observationKey);
 
     this.observationAnomalyAssessmentsService.find({
       stationIds: [observationEntry.observation.stationId],
@@ -577,14 +602,54 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       take(1),
     ).subscribe({
       next: data => {
+        if (this.getSelectedObservationReviewKey() !== observationKey) {
+          return;
+        }
         this.isSelectedObservationAnomalyLoading = false;
         this.selectedObservationAnomalyAssessment = data.length > 0 ? data[0] : null;
       },
       error: err => {
+        if (this.getSelectedObservationReviewKey() !== observationKey) {
+          return;
+        }
         this.isSelectedObservationAnomalyLoading = false;
         this.selectedObservationAnomalyErrorMessage = err?.error?.message || err?.message || 'Failed to load AI anomaly assessment';
       }
     });
+  }
+
+  protected async onSelectedObservationReview(status: ObservationAnomalyReviewStatus): Promise<void> {
+    if (!this.selectedGridObservation || !this.selectedObservationAnomalyAssessment) {
+      return;
+    }
+
+    const observationKey = this.getObservationReviewKey(this.selectedGridObservation);
+    this.isSavingSelectedObservationReview = true;
+    try {
+      const savedState = await AppDatabase.instance.userSettings.get(UserAppStateEnum.OBSERVATION_ANOMALY_REVIEWS);
+      const reviewState: ObservationAnomalyReviewState = savedState?.parameters ?? { reviews: {} };
+      const newReview: ObservationAnomalyReviewModel = {
+        observationKey: observationKey,
+        status: status,
+        reviewedAt: new Date().toISOString(),
+        reviewedByEmail: this.currentUserEmail || undefined,
+        assessmentId: this.selectedObservationAnomalyAssessment.id,
+      };
+
+      reviewState.reviews[observationKey] = newReview;
+      await AppDatabase.instance.userSettings.put({
+        name: UserAppStateEnum.OBSERVATION_ANOMALY_REVIEWS,
+        parameters: reviewState,
+      });
+
+      if (this.getSelectedObservationReviewKey() === observationKey) {
+        this.selectedObservationReview = newReview;
+      }
+    } catch (error) {
+      this.pagesDataService.showToast({ title: 'AI Anomaly Review', message: 'Failed to save review', type: ToastEventTypeEnum.ERROR });
+    } finally {
+      this.isSavingSelectedObservationReview = false;
+    }
   }
 
   protected onFocusSaveButton(): void {
@@ -664,6 +729,43 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     return `${element.id} - ${element.name}`;
   }
 
+  protected formatReviewStatus(status: ObservationAnomalyReviewStatus): string {
+    return StringUtils.formatEnumForDisplay(status);
+  }
+
+  protected get formattedSelectedObservationReviewAt(): string {
+    if (!this.selectedObservationReview) {
+      return '';
+    }
+
+    return DateUtils.getPresentableDatetime(this.selectedObservationReview.reviewedAt, this.cachedMetadataService.utcOffSet);
+  }
+
+  private getObservationReviewKey(observationEntry: ObservationEntry): string {
+    const observation = observationEntry.observation;
+    return [
+      observation.stationId,
+      observation.elementId,
+      observation.level,
+      observation.datetime,
+      observation.interval,
+      observation.sourceId,
+    ].join('|');
+  }
+
+  private getSelectedObservationReviewKey(): string | null {
+    return this.selectedGridObservation ? this.getObservationReviewKey(this.selectedGridObservation) : null;
+  }
+
+  private async loadSelectedObservationReview(observationKey: string): Promise<void> {
+    const savedState = await AppDatabase.instance.userSettings.get(UserAppStateEnum.OBSERVATION_ANOMALY_REVIEWS);
+    const reviewState: ObservationAnomalyReviewState | undefined = savedState?.parameters;
+
+    if (this.getSelectedObservationReviewKey() !== observationKey) {
+      return;
+    }
+
+    this.selectedObservationReview = reviewState?.reviews?.[observationKey] ?? null;
+  }
+
 }
-
-

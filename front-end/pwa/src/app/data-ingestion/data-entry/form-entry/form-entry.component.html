@@ -105,6 +105,40 @@
                 </div>
 
                 <div *ngIf="selectedObservationAnomalyAssessment" class="row g-3">
+                  <div class="col-12">
+                    <div class="small text-muted mb-2">Operator Review</div>
+                    <div class="d-flex flex-wrap gap-2">
+                      <button type="button" class="btn btn-sm"
+                        [class.btn-success]="selectedObservationReview?.status === 'accepted'"
+                        [class.btn-outline-success]="selectedObservationReview?.status !== 'accepted'"
+                        [disabled]="isSavingSelectedObservationReview"
+                        (click)="onSelectedObservationReview('accepted')">
+                        Accept
+                      </button>
+                      <button type="button" class="btn btn-sm"
+                        [class.btn-warning]="selectedObservationReview?.status === 'overridden'"
+                        [class.btn-outline-warning]="selectedObservationReview?.status !== 'overridden'"
+                        [disabled]="isSavingSelectedObservationReview"
+                        (click)="onSelectedObservationReview('overridden')">
+                        Override
+                      </button>
+                      <button type="button" class="btn btn-sm"
+                        [class.btn-danger]="selectedObservationReview?.status === 'needs_investigation'"
+                        [class.btn-outline-danger]="selectedObservationReview?.status !== 'needs_investigation'"
+                        [disabled]="isSavingSelectedObservationReview"
+                        (click)="onSelectedObservationReview('needs_investigation')">
+                        Needs Investigation
+                      </button>
+                    </div>
+                    <div *ngIf="isSavingSelectedObservationReview" class="small text-muted mt-2">
+                      Saving review...
+                    </div>
+                    <div *ngIf="selectedObservationReview" class="small text-muted mt-2">
+                      Marked as {{ formatReviewStatus(selectedObservationReview.status) }}
+                      <span *ngIf="selectedObservationReview.reviewedByEmail">by {{ selectedObservationReview.reviewedByEmail }}</span>
+                      on {{ formattedSelectedObservationReviewAt }}
+                    </div>
+                  </div>
                   <div class="col-sm-6 col-lg-3">
                     <div class="small text-muted">Score</div>
                     <div class="fw-semibold">{{ formatAnomalyScore(selectedObservationAnomalyAssessment.anomalyScore) }}</div>
