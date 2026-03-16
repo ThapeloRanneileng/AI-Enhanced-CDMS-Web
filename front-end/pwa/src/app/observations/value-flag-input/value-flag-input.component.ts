@@ -63,6 +63,8 @@ export class ValueFlagInputComponent implements OnChanges {
 
   @Output() public enterKeyPress = new EventEmitter<void>();
 
+  @Output() public cellSelected = new EventEmitter<ObservationEntry>();
+
   protected activeTab: 'new' | 'history' | 'qctests' | 'aiAnomaly' = 'new';
   protected displayExtraInfoDialog: boolean = false;
   protected duplicateObservation: ViewObservationModel | undefined;
@@ -169,6 +171,10 @@ export class ValueFlagInputComponent implements OnChanges {
 
     // Emit the enter key press event
     this.enterKeyPress.emit();
+  }
+
+  protected onInputClick(): void {
+    this.cellSelected.emit(this.observationEntry);
   }
 
   public onSameValueInput(valueFlagInput: string, comment: string): void {

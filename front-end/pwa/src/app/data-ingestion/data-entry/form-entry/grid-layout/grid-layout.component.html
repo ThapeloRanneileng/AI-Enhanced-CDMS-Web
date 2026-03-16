@@ -31,6 +31,7 @@
                                 [duplicateObservations]="duplicateObservations"
                                 [displayExtraInfoOption]="userFormSettings.displayExtraInformationOption"
                                 (userInputVF)="onUserInputVF($event,colIndex)" [simulateTabOnEnter]="false"
+                                (cellSelected)="onCellSelected($event)"
                                 (enterKeyPress)="onVFEnterKeyPressed(rowIndex, colIndex)" />
                         </div>
                     </td>

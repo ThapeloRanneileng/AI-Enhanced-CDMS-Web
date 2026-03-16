@@ -28,6 +28,8 @@ export class GridLayoutComponent implements OnChanges {
   /** Emitted when observation value is changed */
   @Output() public userInputVF = new EventEmitter<ObservationEntry>();
 
+  @Output() public cellSelected = new EventEmitter<ObservationEntry>();
+
   /** Emitted when observation value or total value is changed */
   @Output() public totalIsValid = new EventEmitter<boolean>();
 
@@ -95,6 +97,10 @@ export class GridLayoutComponent implements OnChanges {
       this.totalErrorMessage[colIndex] = '';
       this.totalIsValid.emit(false);
     }
+  }
+
+  protected onCellSelected(observationDef: ObservationEntry): void {
+    this.cellSelected.emit(observationDef);
   }
 
   /**

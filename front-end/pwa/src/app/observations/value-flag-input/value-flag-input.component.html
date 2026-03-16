@@ -5,7 +5,7 @@
         [showChanges]="observationEntry.change === 'valid_change'" [errorMessage]="validationErrorMessage"
         [warningMessage]="validationWarningMessage" [displayExtraInfoOption]="displayExtraInfoOption"
         [simulateTabOnEnter]="simulateTabOnEnter" (displayExtraInfoOptionClick)="onDisplayExtraInfoOptionClick()"
-        (valueChange)="onInputEntry($event)" (inputEnterKeyPress)="onEnterKeyPressed()" />
+        (valueChange)="onInputEntry($event)" (inputClick)="onInputClick()" (inputEnterKeyPress)="onEnterKeyPressed()" />
 
     <app-dialog [title]="'Extra Information'" [okButtonLabel]="'Ok'" [cancelButtonLabel]="'Cancel'"
         [(open)]="displayExtraInfoDialog" (okClick)="onExtraInfoOkClicked()">

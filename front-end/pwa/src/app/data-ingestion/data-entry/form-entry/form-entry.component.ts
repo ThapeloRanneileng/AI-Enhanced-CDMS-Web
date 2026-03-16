@@ -25,6 +25,9 @@ import { ViewObservationQueryModel } from '../../models/view-observation-query.m
 import { ViewObservationModel } from '../../models/view-observation.model';
 import { ObservationEntry } from 'src/app/observations/models/observation-entry.model';
 import { UserFormSettingsComponent } from './user-form-settings/user-form-settings.component';
+import { ObservationAnomalyAssessmentsService } from 'src/app/quality-control/services/observation-anomaly-assessments.service';
+import { ViewObservationAnomalyAssessmentModel } from 'src/app/quality-control/models/view-observation-anomaly-assessment.model';
+import { NumberUtils } from 'src/app/shared/utils/number.utils';
 
 export interface UserFormSettingStruct {
   displayExtraInformationOption: boolean,
@@ -112,6 +115,10 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected duplicateObservations: Map<string, ViewObservationModel> = new Map<string, ViewObservationModel>();
 
   protected observationEntries: ObservationEntry[] = [];
+  protected selectedGridObservation: ObservationEntry | null = null;
+  protected selectedObservationAnomalyAssessment: ViewObservationAnomalyAssessmentModel | null = null;
+  protected isSelectedObservationAnomalyLoading: boolean = false;
+  protected selectedObservationAnomalyErrorMessage: string = '';
 
   private destroy$ = new Subject<void>();
 
@@ -120,6 +127,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       private appAuthService: AppAuthService,
       private stationFormsService: StationFormsService,
       private observationService: ObservationsService,
+      private observationAnomalyAssessmentsService: ObservationAnomalyAssessmentsService,
       private cachedMetadataService: CachedMetadataService,
       private locationService: AppLocationService,
       private route: ActivatedRoute,
@@ -208,6 +216,10 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     this.refreshLayout = false;
     this.observationEntries = [];
     this.duplicateObservations = new Map<string, ViewObservationModel>();
+    this.selectedGridObservation = null;
+    this.selectedObservationAnomalyAssessment = null;
+    this.isSelectedObservationAnomalyLoading = false;
+    this.selectedObservationAnomalyErrorMessage = '';
 
     const entryFormObsQuery: EntryFormObservationQueryModel = this.formDefinitions.createObservationQuery();
     this.observationService.findEntryFormData(entryFormObsQuery).pipe(
@@ -545,6 +557,36 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     // TODO
   }
 
+  protected onGridCellSelected(observationEntry: ObservationEntry): void {
+    this.selectedGridObservation = observationEntry;
+    this.selectedObservationAnomalyAssessment = null;
+    this.isSelectedObservationAnomalyLoading = true;
+    this.selectedObservationAnomalyErrorMessage = '';
+
+    this.observationAnomalyAssessmentsService.find({
+      stationIds: [observationEntry.observation.stationId],
+      elementIds: [observationEntry.observation.elementId],
+      level: observationEntry.observation.level,
+      intervals: [observationEntry.observation.interval],
+      sourceIds: [observationEntry.observation.sourceId],
+      fromDate: observationEntry.observation.datetime,
+      toDate: observationEntry.observation.datetime,
+      page: 1,
+      pageSize: 1,
+    }).pipe(
+      take(1),
+    ).subscribe({
+      next: data => {
+        this.isSelectedObservationAnomalyLoading = false;
+        this.selectedObservationAnomalyAssessment = data.length > 0 ? data[0] : null;
+      },
+      error: err => {
+        this.isSelectedObservationAnomalyLoading = false;
+        this.selectedObservationAnomalyErrorMessage = err?.error?.message || err?.message || 'Failed to load AI anomaly assessment';
+      }
+    });
+  }
+
   protected onFocusSaveButton(): void {
     // Focusing the save button immediately has a bug of raising a click event immediately thus saving the contents even though its just a focus
     // This timeout is hacky way of solving the problem. 
@@ -597,7 +639,31 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     return distance <= thresholdMeters;
   }
 
-}
+  protected formatAnomalyAssessmentOption(option: string | null): string {
+    return StringUtils.formatEnumForDisplay(option);
+  }
 
+  protected formatAnomalyScore(score: number): number {
+    return NumberUtils.roundOff(score, 3);
+  }
+
+  protected get formattedSelectedAnomalyCreatedAt(): string {
+    if (!this.selectedObservationAnomalyAssessment) {
+      return '';
+    }
+
+    return DateUtils.getPresentableDatetime(this.selectedObservationAnomalyAssessment.createdAt, this.cachedMetadataService.utcOffSet);
+  }
+
+  protected get selectedObservationElementName(): string {
+    if (!this.selectedGridObservation) {
+      return '';
+    }
+
+    const element = this.cachedMetadataService.getElement(this.selectedGridObservation.observation.elementId);
+    return `${element.id} - ${element.name}`;
+  }
+
+}
 
 
