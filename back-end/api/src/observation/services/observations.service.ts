@@ -286,8 +286,20 @@ export class ObservationsService {
         }
         this.logger.log(`Saving entities from user - ${userId}, took: ${(Date.now() - startTime)} milliseconds`);
 
+        const observationKeys = ObservationEventUtils.deduplicateObservationKeys(
+            obsEntities.map(obs => ObservationEventUtils.mapEntityKey(obs))
+        );
+
+        this.logger.log(`Emitting observations.saved for ${observationKeys.length} observation(s)`);
+        if (observationKeys.length > 0) {
+            this.logger.debug(`observations.saved sample key: ${JSON.stringify({
+                ...observationKeys[0],
+                datetime: observationKeys[0].datetime.toISOString(),
+            })}`);
+        }
+
         this.eventEmitter.emit('observations.saved', {
-            observationKeys: ObservationEventUtils.deduplicateObservationKeys(obsEntities.map(obs => ObservationEventUtils.mapEntityKey(obs)))
+            observationKeys,
         });
 
     }

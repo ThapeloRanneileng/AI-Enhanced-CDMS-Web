@@ -99,6 +99,9 @@
                 <div *ngIf="selectedObservationAnomalyErrorMessage" class="text-danger">
                   {{ selectedObservationAnomalyErrorMessage }}
                 </div>
+                <div *ngIf="anomalyRefreshLogMessage" class="small text-muted mb-2">
+                  {{ anomalyRefreshLogMessage }}
+                </div>
                 <div *ngIf="!isSelectedObservationAnomalyLoading && !selectedObservationAnomalyErrorMessage && !selectedObservationAnomalyAssessment"
                   class="text-muted">
                   No AI anomaly assessment found for the selected cell.

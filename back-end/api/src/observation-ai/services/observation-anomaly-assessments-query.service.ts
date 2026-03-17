@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Equal, FindManyOptions, FindOperator, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { ObservationAnomalyAssessmentEntity } from '../entities/observation-anomaly-assessment.entity';
@@ -7,6 +7,8 @@ import { ViewObservationAnomalyAssessmentQueryDto } from '../dtos/view-observati
 
 @Injectable()
 export class ObservationAnomalyAssessmentsQueryService {
+  private readonly logger = new Logger(ObservationAnomalyAssessmentsQueryService.name);
+
   constructor(
     @InjectRepository(ObservationAnomalyAssessmentEntity) private anomalyAssessmentRepo: Repository<ObservationAnomalyAssessmentEntity>,
   ) { }
@@ -31,7 +33,55 @@ export class ObservationAnomalyAssessmentsQueryService {
       take: queryDto.pageSize,
     };
 
+    this.logger.debug(`Observation anomaly assessment find query: ${JSON.stringify({
+      stationIds: queryDto.stationIds,
+      elementIds: queryDto.elementIds,
+      level: queryDto.level,
+      intervals: queryDto.intervals,
+      sourceIds: queryDto.sourceIds,
+      fromDate: queryDto.fromDate ?? null,
+      toDate: queryDto.toDate ?? null,
+      parsedFromDate: queryDto.fromDate ? new Date(queryDto.fromDate).toISOString() : null,
+      parsedToDate: queryDto.toDate ? new Date(queryDto.toDate).toISOString() : null,
+      page: queryDto.page,
+      pageSize: queryDto.pageSize,
+    })}`);
+
     const entities = await this.anomalyAssessmentRepo.find(findOptions);
+    if (entities.length === 0 && queryDto.stationIds?.length === 1 && queryDto.elementIds?.length === 1 && queryDto.intervals?.length === 1 && queryDto.sourceIds?.length === 1 && queryDto.fromDate && queryDto.toDate && queryDto.fromDate === queryDto.toDate) {
+      const nearbyAssessments = await this.anomalyAssessmentRepo.find({
+        where: {
+          stationId: queryDto.stationIds[0],
+          elementId: queryDto.elementIds[0],
+          level: queryDto.level,
+          interval: queryDto.intervals[0],
+          sourceId: queryDto.sourceIds[0],
+        },
+        order: {
+          createdAt: 'DESC',
+        },
+        take: 3,
+      });
+      const requestedDate = new Date(queryDto.fromDate);
+
+      this.logger.warn(`No anomaly assessment rows found for exact datetime lookup ${requestedDate.toISOString()}`);
+      this.logger.warn(`Anomaly assessment query diagnostics: ${JSON.stringify({
+        stationId: queryDto.stationIds[0],
+        elementId: queryDto.elementIds[0],
+        level: queryDto.level,
+        interval: queryDto.intervals[0],
+        sourceId: queryDto.sourceIds[0],
+        requestedDatetimeIso: requestedDate.toISOString(),
+        requestedDatetimeEpochMs: requestedDate.getTime(),
+        nearbyAssessments: nearbyAssessments.map((assessment) => ({
+          id: assessment.id,
+          datetime: assessment.datetime.toISOString(),
+          createdAt: assessment.createdAt.toISOString(),
+          deltaMsFromRequested: assessment.datetime.getTime() - requestedDate.getTime(),
+        })),
+      })}`);
+    }
+
     return entities.map(entity => ({
       id: entity.id,
       stationId: entity.stationId,

@@ -42,6 +42,7 @@ export class ObservationAnomalyAssessmentService {
     });
 
     const savedAssessment = await this.anomalyAssessmentRepo.save(assessment);
+    this.logger.log(`Saved anomaly assessment row ${savedAssessment.id} for ${savedAssessment.stationId}/${savedAssessment.elementId}/${savedAssessment.datetime.toISOString()}`);
     this.eventEmitter.emit('observations.ai-quality-controlled');
 
     return savedAssessment;
@@ -52,13 +53,46 @@ export class ObservationAnomalyAssessmentService {
     assessmentType: ObservationAnomalyAssessmentTypeEnum,
     userId: number | null = null,
   ): Promise<ObservationAnomalyAssessmentEntity | null> {
+    this.logger.debug(`Attempting anomaly assessment lookup for key ${JSON.stringify({
+      ...key,
+      datetime: key.datetime.toISOString(),
+    })}`);
     const observation = await this.observationRepo.findOneBy(key);
 
     if (!observation) {
+      const nearbyObservations = await this.observationRepo.find({
+        where: {
+          stationId: key.stationId,
+          elementId: key.elementId,
+          level: key.level,
+          interval: key.interval,
+          sourceId: key.sourceId,
+        },
+        order: {
+          datetime: 'DESC',
+        },
+        take: 3,
+      });
+      const nearbyObservationDiagnostics = nearbyObservations.map((candidate) => ({
+        datetime: candidate.datetime.toISOString(),
+        deltaMsFromEventKey: candidate.datetime.getTime() - key.datetime.getTime(),
+      }));
+
       this.logger.warn(`Skipping anomaly assessment. Observation not found for ${key.stationId}/${key.elementId}/${key.datetime.toISOString()}`);
+      this.logger.warn(`Anomaly lookup diagnostics: ${JSON.stringify({
+        stationId: key.stationId,
+        elementId: key.elementId,
+        level: key.level,
+        interval: key.interval,
+        sourceId: key.sourceId,
+        requestedDatetimeIso: key.datetime.toISOString(),
+        requestedDatetimeEpochMs: key.datetime.getTime(),
+        nearbyObservations: nearbyObservationDiagnostics,
+      })}`);
       return null;
     }
 
+    this.logger.debug(`Observation found for anomaly assessment key with datetime ${observation.datetime.toISOString()}`);
     return this.assessObservation(observation, assessmentType, userId);
   }
 }

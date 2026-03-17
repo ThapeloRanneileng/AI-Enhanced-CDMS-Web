@@ -43,6 +43,11 @@ interface ObservationAnomalyReviewState {
   reviews: Record<string, ObservationAnomalyReviewModel>;
 }
 
+interface ObservationLoadOptions {
+  selectedObservationKey?: string | null;
+  postSaveObservationKeys?: string[];
+}
+
 export interface UserFormSettingStruct {
   displayExtraInformationOption: boolean,
   incrementDateSelector: boolean;
@@ -135,6 +140,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected selectedObservationAnomalyErrorMessage: string = '';
   protected selectedObservationReview: ObservationAnomalyReviewModel | null = null;
   protected isSavingSelectedObservationReview: boolean = false;
+  protected anomalyRefreshLogMessage: string = '';
 
   private currentUserEmail: string = '';
 
@@ -229,18 +235,16 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   /**
    * Loads any existing observations from the database
    */
-  private loadObservations(): void {
+  private loadObservations(options?: ObservationLoadOptions): void {
     // Reset controls
     this.totalIsValid = false;
     this.refreshLayout = false;
     this.observationEntries = [];
     this.duplicateObservations = new Map<string, ViewObservationModel>();
-    this.selectedGridObservation = null;
-    this.selectedObservationAnomalyAssessment = null;
-    this.isSelectedObservationAnomalyLoading = false;
-    this.selectedObservationAnomalyErrorMessage = '';
-    this.selectedObservationReview = null;
-    this.isSavingSelectedObservationReview = false;
+    this.resetSelectedObservationPanel({
+      keepSelection: !!options?.selectedObservationKey || !!options?.postSaveObservationKeys?.length,
+      keepRefreshLog: !!options?.postSaveObservationKeys?.length,
+    });
 
     const entryFormObsQuery: EntryFormObservationQueryModel = this.formDefinitions.createObservationQuery();
     this.observationService.findEntryFormData(entryFormObsQuery).pipe(
@@ -255,6 +259,10 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       // If double data entry is not allowed then fetch duplicates so that value flag component can prevent double data entry
       if (!this.formDefinitions.formMetadata.allowDoubleDataEntry) {
         this.loadDuplicates(entryFormObsQuery);
+      }
+
+      if (options?.selectedObservationKey || options?.postSaveObservationKeys?.length) {
+        this.restoreSelectedObservationAfterLoad(options);
       }
     });
   }
@@ -434,8 +442,10 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     }
 
     const createObservations: CreateObservationModel[] = [];
+    const savedObservationKeys: string[] = [];
     for (const obsEntry of this.observationEntries) {
       if (obsEntry.change === 'valid_change') {
+        savedObservationKeys.push(this.getObservationReviewKey(obsEntry));
         createObservations.push({
           stationId: obsEntry.observation.stationId,
           elementId: obsEntry.observation.elementId,
@@ -477,7 +487,11 @@ export class FormEntryComponent implements OnInit, OnDestroy {
         }
 
         // Reload the data from server
-        this.loadObservations();
+        const selectedObservationKey = this.getSelectedObservationReviewKey();
+        this.loadObservations({
+          selectedObservationKey: selectedObservationKey,
+          postSaveObservationKeys: savedObservationKeys,
+        });
       },
       error: err => {
         if (AppAuthInterceptor.isKnownNetworkError(err)) {
@@ -579,43 +593,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   }
 
   protected onGridCellSelected(observationEntry: ObservationEntry): void {
-    const observationKey = this.getObservationReviewKey(observationEntry);
-    this.selectedGridObservation = observationEntry;
-    this.selectedObservationAnomalyAssessment = null;
-    this.isSelectedObservationAnomalyLoading = true;
-    this.selectedObservationAnomalyErrorMessage = '';
-    this.selectedObservationReview = null;
-
-    void this.loadSelectedObservationReview(observationKey);
-
-    this.observationAnomalyAssessmentsService.find({
-      stationIds: [observationEntry.observation.stationId],
-      elementIds: [observationEntry.observation.elementId],
-      level: observationEntry.observation.level,
-      intervals: [observationEntry.observation.interval],
-      sourceIds: [observationEntry.observation.sourceId],
-      fromDate: observationEntry.observation.datetime,
-      toDate: observationEntry.observation.datetime,
-      page: 1,
-      pageSize: 1,
-    }).pipe(
-      take(1),
-    ).subscribe({
-      next: data => {
-        if (this.getSelectedObservationReviewKey() !== observationKey) {
-          return;
-        }
-        this.isSelectedObservationAnomalyLoading = false;
-        this.selectedObservationAnomalyAssessment = data.length > 0 ? data[0] : null;
-      },
-      error: err => {
-        if (this.getSelectedObservationReviewKey() !== observationKey) {
-          return;
-        }
-        this.isSelectedObservationAnomalyLoading = false;
-        this.selectedObservationAnomalyErrorMessage = err?.error?.message || err?.message || 'Failed to load AI anomaly assessment';
-      }
-    });
+    this.showObservationAnomalyPanel(observationEntry);
   }
 
   protected async onSelectedObservationReview(status: ObservationAnomalyReviewStatus): Promise<void> {
@@ -766,6 +744,119 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     }
 
     this.selectedObservationReview = reviewState?.reviews?.[observationKey] ?? null;
+  }
+
+  private resetSelectedObservationPanel(options?: { keepSelection?: boolean; keepRefreshLog?: boolean }): void {
+    if (!options?.keepSelection) {
+      this.selectedGridObservation = null;
+    }
+    this.selectedObservationAnomalyAssessment = null;
+    this.isSelectedObservationAnomalyLoading = false;
+    this.selectedObservationAnomalyErrorMessage = '';
+    this.selectedObservationReview = null;
+    this.isSavingSelectedObservationReview = false;
+    if (!options?.keepRefreshLog) {
+      this.anomalyRefreshLogMessage = '';
+    }
+  }
+
+  private restoreSelectedObservationAfterLoad(options: ObservationLoadOptions): void {
+    const candidateKeys = [
+      options.selectedObservationKey,
+      ...(options.postSaveObservationKeys ?? []),
+    ].filter((key): key is string => !!key);
+
+    for (const key of candidateKeys) {
+      const matchedObservation = this.getObservationEntryByKey(key);
+      if (matchedObservation) {
+        this.showObservationAnomalyPanel(matchedObservation, true, options.postSaveObservationKeys ?? []);
+        return;
+      }
+    }
+
+    if (options.postSaveObservationKeys && options.postSaveObservationKeys.length > 0) {
+      this.anomalyRefreshLogMessage = `AI anomaly refresh skipped: ${options.postSaveObservationKeys.length} saved cell(s) were not visible after reload.`;
+      console.info('[Data Entry] AI anomaly refresh skipped after save', {
+        savedObservationKeys: options.postSaveObservationKeys,
+      });
+    }
+  }
+
+  private showObservationAnomalyPanel(observationEntry: ObservationEntry, triggeredByPostSave: boolean = false, savedObservationKeys: string[] = []): void {
+    const observationKey = this.getObservationReviewKey(observationEntry);
+    const persistedObservationDatetime = DateUtils.getDatetimesBasedOnUTCOffset(
+      observationEntry.observation.datetime,
+      this.source.utcOffset,
+      'subtract',
+    );
+    this.selectedGridObservation = observationEntry;
+    this.selectedObservationAnomalyAssessment = null;
+    this.isSelectedObservationAnomalyLoading = true;
+    this.selectedObservationAnomalyErrorMessage = '';
+    this.selectedObservationReview = null;
+    this.anomalyRefreshLogMessage = triggeredByPostSave ? 'Refreshing AI anomaly assessment after save...' : '';
+
+    void this.loadSelectedObservationReview(observationKey);
+
+    console.info('[Data Entry] Fetching AI anomaly assessment', {
+      selectedObservationKey: observationKey,
+      displayDatetime: observationEntry.observation.datetime,
+      persistedLookupDatetime: persistedObservationDatetime,
+      sourceUtcOffset: this.source.utcOffset,
+      triggeredByPostSave,
+    });
+
+    this.observationAnomalyAssessmentsService.find({
+      stationIds: [observationEntry.observation.stationId],
+      elementIds: [observationEntry.observation.elementId],
+      level: observationEntry.observation.level,
+      intervals: [observationEntry.observation.interval],
+      sourceIds: [observationEntry.observation.sourceId],
+      fromDate: persistedObservationDatetime,
+      toDate: persistedObservationDatetime,
+      page: 1,
+      pageSize: 1,
+    }).pipe(
+      take(1),
+    ).subscribe({
+      next: data => {
+        if (this.getSelectedObservationReviewKey() !== observationKey) {
+          return;
+        }
+        this.isSelectedObservationAnomalyLoading = false;
+        this.selectedObservationAnomalyAssessment = data.length > 0 ? data[0] : null;
+        if (triggeredByPostSave) {
+          const affectedCount = savedObservationKeys.length;
+          this.anomalyRefreshLogMessage = data.length > 0
+            ? `AI anomaly assessment refreshed for ${affectedCount} recently saved cell(s).`
+            : `AI anomaly assessment refresh completed, but no generated assessment was found for the selected saved cell.`;
+          console.info('[Data Entry] AI anomaly refresh after save', {
+            selectedObservationKey: observationKey,
+            savedObservationCount: affectedCount,
+            assessmentGenerated: data.length > 0,
+          });
+        }
+      },
+      error: err => {
+        if (this.getSelectedObservationReviewKey() !== observationKey) {
+          return;
+        }
+        this.isSelectedObservationAnomalyLoading = false;
+        this.selectedObservationAnomalyErrorMessage = err?.error?.message || err?.message || 'Failed to load AI anomaly assessment';
+        if (triggeredByPostSave) {
+          this.anomalyRefreshLogMessage = 'AI anomaly refresh failed after save.';
+          console.warn('[Data Entry] AI anomaly refresh failed after save', {
+            selectedObservationKey: observationKey,
+            savedObservationCount: savedObservationKeys.length,
+            error: err,
+          });
+        }
+      }
+    });
+  }
+
+  private getObservationEntryByKey(observationKey: string): ObservationEntry | undefined {
+    return this.observationEntries.find(entry => this.getObservationReviewKey(entry) === observationKey);
   }
 
 }

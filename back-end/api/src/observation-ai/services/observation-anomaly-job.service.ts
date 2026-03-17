@@ -16,6 +16,12 @@ export class ObservationAnomalyJobService {
   async handleObservationsSaved(event: ObservationsSavedEvent) {
     const observationKeys = event?.observationKeys ?? [];
     this.logger.log(`Received observations.saved event for ${observationKeys.length} observation(s)`);
+    if (observationKeys.length > 0) {
+      this.logger.debug(`observations.saved first key at listener: ${JSON.stringify({
+        ...observationKeys[0],
+        datetime: observationKeys[0].datetime.toISOString(),
+      })}`);
+    }
 
     for (const key of observationKeys) {
       await this.observationAnomalyAssessmentService.assessObservationByKey(key, ObservationAnomalyAssessmentTypeEnum.INGESTION);
