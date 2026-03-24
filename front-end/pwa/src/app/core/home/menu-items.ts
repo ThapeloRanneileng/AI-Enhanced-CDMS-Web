@@ -33,7 +33,7 @@ export enum SubMenuNameEnum {
     DATA_EXPLORER = 'Data Explorer',
 
     SOURCE_CHECKS = 'Source Checks',
-    QC_ASSESSMENT = 'QC Assessment',
+    QC_ASSESSMENT = 'QC Review Workspace',
     //SCHEDULED_QC_TESTS = 'Scheduled QC Tests',
 
     MANUAL_EXPORT = 'Manual Export',
@@ -130,7 +130,7 @@ export class MenuItemsUtil {
                 },
                 {
                     name: SubMenuNameEnum.QC_ASSESSMENT,
-                    url: '/qc-assessment',
+                    url: '/review-workspace',
                 },
                 // {
                 //     name: SubMenuNameEnum.SCHEDULED_QC_TESTS,
@@ -242,9 +242,6 @@ export class MenuItemsUtil {
         }
     }
 }
-
-
-
 
 
 

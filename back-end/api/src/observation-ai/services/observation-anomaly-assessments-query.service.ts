@@ -4,6 +4,9 @@ import { Between, Equal, FindManyOptions, FindOperator, FindOptionsWhere, In, Le
 import { ObservationAnomalyAssessmentEntity } from '../entities/observation-anomaly-assessment.entity';
 import { ViewObservationAnomalyAssessmentDto } from '../dtos/view-observation-anomaly-assessment.dto';
 import { ViewObservationAnomalyAssessmentQueryDto } from '../dtos/view-observation-anomaly-assessment-query.dto';
+import { ObservationEntity } from 'src/observation/entities/observation.entity';
+import { QCStatusEnum } from 'src/observation/enums/qc-status.enum';
+import { FlagEnum } from 'src/observation/enums/flag.enum';
 
 @Injectable()
 export class ObservationAnomalyAssessmentsQueryService {
@@ -11,6 +14,7 @@ export class ObservationAnomalyAssessmentsQueryService {
 
   constructor(
     @InjectRepository(ObservationAnomalyAssessmentEntity) private anomalyAssessmentRepo: Repository<ObservationAnomalyAssessmentEntity>,
+    @InjectRepository(ObservationEntity) private observationRepo: Repository<ObservationEntity>,
   ) { }
 
   public async find(queryDto: ViewObservationAnomalyAssessmentQueryDto): Promise<ViewObservationAnomalyAssessmentDto[]> {
@@ -82,24 +86,82 @@ export class ObservationAnomalyAssessmentsQueryService {
       })}`);
     }
 
-    return entities.map(entity => ({
-      id: entity.id,
-      stationId: entity.stationId,
-      elementId: entity.elementId,
-      level: entity.level,
-      datetime: entity.datetime.toISOString(),
-      interval: entity.interval,
-      sourceId: entity.sourceId,
-      assessmentType: entity.assessmentType,
-      modelId: entity.modelId,
-      modelVersion: entity.modelVersion,
-      anomalyScore: entity.anomalyScore,
-      severity: entity.severity,
-      outcome: entity.outcome,
-      reasons: entity.reasons ?? [],
-      featureSnapshot: entity.featureSnapshot,
-      createdByUserId: entity.createdByUserId,
-      createdAt: entity.createdAt.toISOString(),
+    return Promise.all(entities.map(async (entity) => {
+      const observation = await this.observationRepo.findOneBy({
+        stationId: entity.stationId,
+        elementId: entity.elementId,
+        level: entity.level,
+        datetime: entity.datetime,
+        interval: entity.interval,
+        sourceId: entity.sourceId,
+      });
+      const failedChecks = this.extractFailedChecks(observation);
+      const finalDecision = this.buildFinalDecision(observation);
+
+      return {
+        id: entity.id,
+        stationId: entity.stationId,
+        elementId: entity.elementId,
+        level: entity.level,
+        datetime: entity.datetime.toISOString(),
+        interval: entity.interval,
+        sourceId: entity.sourceId,
+        assessmentType: entity.assessmentType,
+        modelId: entity.modelId,
+        modelFamily: entity.modelFamily,
+        modelVersion: entity.modelVersion,
+        anomalyScore: entity.anomalyScore,
+        confidenceScore: entity.confidenceScore,
+        severity: entity.severity,
+        outcome: entity.outcome,
+        reasons: entity.reasons ?? [],
+        featureSnapshot: entity.featureSnapshot,
+        contributingSignals: entity.contributingSignals ?? [],
+        generativeExplanation: entity.generativeExplanation,
+        reviewQueue: {
+          ruleBasedQc: observation?.qcStatus ?? null,
+          failedChecks,
+          aiScore: entity.anomalyScore,
+          aiConfidence: entity.confidenceScore,
+          aiExplanation: entity.generativeExplanation?.summary ?? null,
+          finalDecision,
+        },
+        rawObservationData: observation ? {
+          value: observation.value,
+          flag: observation.flag,
+          qcStatus: observation.qcStatus,
+          comment: observation.comment,
+          deleted: observation.deleted,
+        } : null,
+        ruleBasedQcResults: observation ? {
+          status: observation.qcStatus,
+          failedChecks,
+          qcTestLog: observation.qcTestLog ?? [],
+        } : null,
+        mlAnomalyOutputs: {
+          modelId: entity.modelId,
+          modelFamily: entity.modelFamily,
+          modelVersion: entity.modelVersion,
+          anomalyStatus: entity.outcome,
+          anomalyScore: entity.anomalyScore,
+          confidenceScore: entity.confidenceScore,
+          severity: entity.severity,
+          contributingSignals: entity.contributingSignals ?? [],
+          featureSnapshot: entity.featureSnapshot,
+        },
+        reviewerControls: observation ? {
+          finalDecision,
+          reviewerComment: observation.comment,
+          availableActions: [
+            'accept_observation',
+            'mark_suspect',
+            'fail_observation',
+            'add_reviewer_comment',
+          ],
+        } : null,
+        createdByUserId: entity.createdByUserId,
+        createdAt: entity.createdAt.toISOString(),
+      };
     }));
   }
 
@@ -176,5 +238,43 @@ export class ObservationAnomalyAssessmentsQueryService {
     }
 
     return null;
+  }
+
+  private extractFailedChecks(observation: ObservationEntity | null): string[] {
+    if (!observation?.qcTestLog) {
+      return [];
+    }
+
+    return observation.qcTestLog
+      .filter((item) => item.qcStatus === QCStatusEnum.FAILED)
+      .map((item) => `QC Test ${item.qcTestId}`);
+  }
+
+  private buildFinalDecision(observation: ObservationEntity | null): string {
+    if (!observation) {
+      return 'pending_reviewer_decision';
+    }
+
+    if (observation.deleted) {
+      return 'deleted';
+    }
+
+    if (observation.flag === FlagEnum.DUBIOUS) {
+      return 'marked_dubious';
+    }
+
+    if (observation.qcStatus === QCStatusEnum.PASSED) {
+      return 'accepted';
+    }
+
+    if (observation.qcStatus === QCStatusEnum.FAILED) {
+      return 'pending_reviewer_decision';
+    }
+
+    if (observation.flag) {
+      return `flagged_${observation.flag}`;
+    }
+
+    return 'pending_reviewer_decision';
   }
 }

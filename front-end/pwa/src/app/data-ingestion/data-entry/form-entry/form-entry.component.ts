@@ -4,7 +4,7 @@ import { ActivatedRoute } from '@angular/router';
 import { PagesDataService, ToastEventTypeEnum } from 'src/app/core/services/pages-data.service';
 import { StringUtils } from 'src/app/shared/utils/string.utils';
 import { CreateObservationModel } from 'src/app/data-ingestion/models/create-observation.model';
-import { map, Subject, take, takeUntil } from 'rxjs';
+import { firstValueFrom, map, Subject, take, takeUntil } from 'rxjs';
 import { FormEntryDefinition } from './defintitions/form-entry.definition';
 import { ViewSourceModel } from 'src/app/metadata/source-specifications/models/view-source.model';
 import { AssignSameInputComponent, SameInputStruct } from './assign-same-input/assign-same-input.component';
@@ -132,6 +132,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
 
   // Key is `elementId-datetime`
   protected duplicateObservations: Map<string, ViewObservationModel> = new Map<string, ViewObservationModel>();
+  protected observationAnomalyAssessmentsByKey: Map<string, ViewObservationAnomalyAssessmentModel> = new Map<string, ViewObservationAnomalyAssessmentModel>();
 
   protected observationEntries: ObservationEntry[] = [];
   protected selectedGridObservation: ObservationEntry | null = null;
@@ -241,6 +242,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     this.refreshLayout = false;
     this.observationEntries = [];
     this.duplicateObservations = new Map<string, ViewObservationModel>();
+    this.observationAnomalyAssessmentsByKey = new Map<string, ViewObservationAnomalyAssessmentModel>();
     this.resetSelectedObservationPanel({
       keepSelection: !!options?.selectedObservationKey || !!options?.postSaveObservationKeys?.length,
       keepRefreshLog: !!options?.postSaveObservationKeys?.length,
@@ -260,6 +262,8 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       if (!this.formDefinitions.formMetadata.allowDoubleDataEntry) {
         this.loadDuplicates(entryFormObsQuery);
       }
+
+      void this.loadVisibleObservationAnomalyAssessments(entryFormObsQuery);
 
       if (options?.selectedObservationKey || options?.postSaveObservationKeys?.length) {
         this.restoreSelectedObservationAfterLoad(options);
@@ -721,14 +725,14 @@ export class FormEntryComponent implements OnInit, OnDestroy {
 
   private getObservationReviewKey(observationEntry: ObservationEntry): string {
     const observation = observationEntry.observation;
-    return [
+    return this.getObservationKeyFromParts(
       observation.stationId,
       observation.elementId,
       observation.level,
       observation.datetime,
       observation.interval,
       observation.sourceId,
-    ].join('|');
+    );
   }
 
   private getSelectedObservationReviewKey(): string | null {
@@ -825,6 +829,9 @@ export class FormEntryComponent implements OnInit, OnDestroy {
         }
         this.isSelectedObservationAnomalyLoading = false;
         this.selectedObservationAnomalyAssessment = data.length > 0 ? data[0] : null;
+        if (data.length > 0) {
+          this.observationAnomalyAssessmentsByKey.set(observationKey, data[0]);
+        }
         if (triggeredByPostSave) {
           const affectedCount = savedObservationKeys.length;
           this.anomalyRefreshLogMessage = data.length > 0
@@ -857,6 +864,81 @@ export class FormEntryComponent implements OnInit, OnDestroy {
 
   private getObservationEntryByKey(observationKey: string): ObservationEntry | undefined {
     return this.observationEntries.find(entry => this.getObservationReviewKey(entry) === observationKey);
+  }
+
+  private async loadVisibleObservationAnomalyAssessments(entryFormObsQuery: EntryFormObservationQueryModel): Promise<void> {
+    try {
+      const pageSize = 1000;
+      const fetchedAssessments: ViewObservationAnomalyAssessmentModel[] = [];
+      let page = 1;
+
+      while (true) {
+        const batch = await firstValueFrom(this.observationAnomalyAssessmentsService.find({
+          stationIds: [entryFormObsQuery.stationId],
+          elementIds: entryFormObsQuery.elementIds,
+          level: entryFormObsQuery.level,
+          intervals: [entryFormObsQuery.interval],
+          sourceIds: [entryFormObsQuery.sourceId],
+          fromDate: entryFormObsQuery.fromDate,
+          toDate: entryFormObsQuery.toDate,
+          page,
+          pageSize,
+        }).pipe(take(1)));
+
+        fetchedAssessments.push(...batch);
+
+        if (batch.length < pageSize) {
+          break;
+        }
+
+        page++;
+      }
+
+      const assessmentMap = new Map<string, ViewObservationAnomalyAssessmentModel>();
+
+      for (const assessment of fetchedAssessments) {
+        const displayDatetime = DateUtils.getDatetimesBasedOnUTCOffset(
+          assessment.datetime,
+          this.source.utcOffset,
+          'add',
+        );
+        const observationKey = this.getObservationKeyFromParts(
+          assessment.stationId,
+          assessment.elementId,
+          assessment.level,
+          displayDatetime,
+          assessment.interval,
+          assessment.sourceId,
+        );
+
+        if (!assessmentMap.has(observationKey)) {
+          assessmentMap.set(observationKey, assessment);
+        }
+      }
+
+      this.observationAnomalyAssessmentsByKey = assessmentMap;
+    } catch (err) {
+      console.warn('[Data Entry] Failed to load visible AI anomaly assessments for grid highlighting', err);
+      this.observationAnomalyAssessmentsByKey = new Map<string, ViewObservationAnomalyAssessmentModel>();
+    }
+  }
+
+  private getObservationKeyFromParts(
+    stationId: string,
+    elementId: number,
+    level: number,
+    datetime: string,
+    interval: number,
+    sourceId: number,
+  ): string {
+    return [
+      stationId,
+      elementId,
+      level,
+      datetime,
+      interval,
+      sourceId,
+    ].join('|');
   }
 
 }

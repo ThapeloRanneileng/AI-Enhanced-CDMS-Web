@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ObservationEntity } from 'src/observation/entities/observation.entity';
-import { ObservationAnomalyOutcomeEnum, ObservationAnomalySeverityEnum } from '../entities/observation-anomaly-assessment.entity';
+import {
+  ObservationAnomalyOutcomeEnum,
+  ObservationAnomalySeverityEnum,
+  ObservationMlContributingSignal,
+} from '../entities/observation-anomaly-assessment.entity';
 import { AnomalyFeatureBuilderService, ObservationAnomalyFeatureSet } from './anomaly-feature-builder.service';
 import { AnomalyModelRegistryService } from './anomaly-model-registry.service';
 import { NumberUtils } from 'src/shared/utils/number.utils';
@@ -13,12 +17,15 @@ export interface ObservationAnomalyDetectionResult {
   sourceId: number;
   datetime: string;
   modelId: string;
+  modelFamily: string;
   modelVersion: string;
+  confidenceScore: number;
   anomalyScore: number;
   severity: ObservationAnomalySeverityEnum;
   outcome: ObservationAnomalyOutcomeEnum;
   reasons: string[];
   featureSnapshot: Record<string, number | string | null>;
+  contributingSignals: ObservationMlContributingSignal[];
 }
 
 @Injectable()
@@ -45,12 +52,15 @@ export class ObservationAnomalyDetectionService {
         sourceId: observation.sourceId,
         datetime: observation.datetime.toISOString(),
         modelId: model.modelId,
+        modelFamily: model.modelFamily,
         modelVersion: model.modelVersion,
+        confidenceScore: 0,
         anomalyScore: 0,
         severity: ObservationAnomalySeverityEnum.LOW,
         outcome: ObservationAnomalyOutcomeEnum.NOT_APPLICABLE,
         reasons,
         featureSnapshot: featureSet.features,
+        contributingSignals: [],
       };
     }
 
@@ -59,15 +69,32 @@ export class ObservationAnomalyDetectionService {
     const seasonalHistoryCount = this.getNumericFeature(featureSet.features.seasonalHistoryCount);
     const seasonalZScore = this.getNumericFeature(featureSet.features.seasonalZScore);
 
+    const contributingSignals: ObservationMlContributingSignal[] = [];
     const usableScores: number[] = [];
 
     if (rollingHistoryCount !== null && rollingHistoryCount >= this.minimumHistoryCount && rollingZScore !== null) {
-      usableScores.push(Math.abs(rollingZScore));
+      const score = this.normalizeZScore(rollingZScore);
+      usableScores.push(score);
+      contributingSignals.push(this.buildSignal(
+        'rolling_z_score',
+        'rollingZScore',
+        rollingZScore,
+        0,
+        score,
+      ));
       reasons.push(`Rolling z-score ${NumberUtils.roundOff(rollingZScore, 2)} using ${rollingHistoryCount} prior observations`);
     }
 
     if (seasonalHistoryCount !== null && seasonalHistoryCount >= this.minimumHistoryCount && seasonalZScore !== null) {
-      usableScores.push(Math.abs(seasonalZScore));
+      const score = this.normalizeZScore(seasonalZScore);
+      usableScores.push(score);
+      contributingSignals.push(this.buildSignal(
+        'seasonal_z_score',
+        'seasonalZScore',
+        seasonalZScore,
+        0,
+        score,
+      ));
       reasons.push(`Seasonal z-score ${NumberUtils.roundOff(seasonalZScore, 2)} using ${seasonalHistoryCount} same-month observations`);
     }
 
@@ -81,17 +108,20 @@ export class ObservationAnomalyDetectionService {
         sourceId: observation.sourceId,
         datetime: observation.datetime.toISOString(),
         modelId: model.modelId,
+        modelFamily: model.modelFamily,
         modelVersion: model.modelVersion,
+        confidenceScore: 0.15,
         anomalyScore: 0,
         severity: ObservationAnomalySeverityEnum.LOW,
         outcome: ObservationAnomalyOutcomeEnum.NOT_APPLICABLE,
         reasons,
         featureSnapshot: featureSet.features,
+        contributingSignals,
       };
     }
 
-    const strongestDeviation = Math.max(...usableScores);
-    const anomalyScore = this.computeAnomalyScore(strongestDeviation);
+    const anomalyScore = this.computeEnsembleScore(usableScores);
+    const confidenceScore = this.computeConfidenceScore(rollingHistoryCount, seasonalHistoryCount, contributingSignals);
     const severity = this.mapSeverity(anomalyScore);
     const outcome = this.mapOutcome(severity);
 
@@ -111,12 +141,15 @@ export class ObservationAnomalyDetectionService {
       sourceId: observation.sourceId,
       datetime: observation.datetime.toISOString(),
       modelId: model.modelId,
+      modelFamily: model.modelFamily,
       modelVersion: model.modelVersion,
+      confidenceScore,
       anomalyScore,
       severity,
       outcome,
       reasons,
       featureSnapshot: featureSet.features,
+      contributingSignals: contributingSignals.sort((left, right) => right.contributionScore - left.contributionScore),
     };
   }
 
@@ -128,12 +161,54 @@ export class ObservationAnomalyDetectionService {
     return null;
   }
 
-  private computeAnomalyScore(absZScore: number): number {
-    if (!Number.isFinite(absZScore) || absZScore <= 0) {
+  private normalizeZScore(zScore: number): number {
+    if (!Number.isFinite(zScore)) {
       return 0;
     }
 
-    return NumberUtils.roundOff(Math.min(absZScore / 6, 1), 4);
+    return NumberUtils.roundOff(Math.min(Math.abs(zScore) / 6, 1), 4);
+  }
+
+  private computeEnsembleScore(scores: number[]): number {
+    if (!scores.length) {
+      return 0;
+    }
+
+    const weightedAverage = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+    const strongestSignal = Math.max(...scores);
+
+    return NumberUtils.roundOff(Math.min((weightedAverage * 0.6) + (strongestSignal * 0.4), 1), 4);
+  }
+
+  private computeConfidenceScore(
+    rollingHistoryCount: number | null,
+    seasonalHistoryCount: number | null,
+    contributingSignals: ObservationMlContributingSignal[],
+  ): number {
+    const rollingCoverage = rollingHistoryCount === null ? 0 : Math.min(rollingHistoryCount / 30, 1);
+    const seasonalCoverage = seasonalHistoryCount === null ? 0 : Math.min(seasonalHistoryCount / 60, 1);
+    const signalStrength = contributingSignals.length === 0
+      ? 0
+      : contributingSignals.reduce((sum, signal) => sum + signal.contributionScore, 0) / contributingSignals.length;
+
+    return NumberUtils.roundOff(Math.min((rollingCoverage * 0.35) + (seasonalCoverage * 0.35) + (signalStrength * 0.3), 1), 4);
+  }
+
+  private buildSignal(
+    signal: string,
+    feature: string,
+    observedValue: number,
+    expectedValue: number | null,
+    contributionScore: number,
+  ): ObservationMlContributingSignal {
+    return {
+      signal,
+      feature,
+      observedValue: NumberUtils.roundOff(observedValue, 4),
+      expectedValue,
+      contributionScore: NumberUtils.roundOff(contributionScore, 4),
+      direction: observedValue > 0 ? 'higher' : observedValue < 0 ? 'lower' : 'neutral',
+    };
   }
 
   private mapSeverity(anomalyScore: number): ObservationAnomalySeverityEnum {

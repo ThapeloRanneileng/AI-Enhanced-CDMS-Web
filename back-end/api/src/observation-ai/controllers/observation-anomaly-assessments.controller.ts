@@ -14,8 +14,18 @@ export class ObservationAnomalyAssessmentsController {
     return this.observationAnomalyAssessmentsQueryService.find(queryDto);
   }
 
+  @Get('review-workspace')
+  public findForReviewWorkspace(@Query(AuthorisedStationsPipe) queryDto: ViewObservationAnomalyAssessmentQueryDto) {
+    return this.observationAnomalyAssessmentsQueryService.find(queryDto);
+  }
+
   @Get('count')
   public count(@Query(AuthorisedStationsPipe) queryDto: ViewObservationAnomalyAssessmentQueryDto) {
+    return this.observationAnomalyAssessmentsQueryService.count(queryDto);
+  }
+
+  @Get('review-workspace/count')
+  public countForReviewWorkspace(@Query(AuthorisedStationsPipe) queryDto: ViewObservationAnomalyAssessmentQueryDto) {
     return this.observationAnomalyAssessmentsQueryService.count(queryDto);
   }
 }

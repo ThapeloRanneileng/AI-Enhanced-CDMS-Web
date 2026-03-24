@@ -6,6 +6,7 @@ import { ViewObservationModel } from '../../../models/view-observation.model';
 import { CachedMetadataService } from 'src/app/metadata/metadata-updates/cached-metadata.service';
 import { ObservationEntry } from 'src/app/observations/models/observation-entry.model';
 import { UserFormSettingStruct } from '../form-entry.component';
+import { ViewObservationAnomalyAssessmentModel } from 'src/app/quality-control/models/view-observation-anomaly-assessment.model';
 
 @Component({
   selector: 'app-grid-layout',
@@ -22,6 +23,8 @@ export class GridLayoutComponent implements OnChanges {
   @Input() public formDefinitions!: FormEntryDefinition;
 
   @Input() public duplicateObservations!: Map<string, ViewObservationModel>;
+
+  @Input() public observationAnomalyAssessmentsByKey!: Map<string, ViewObservationAnomalyAssessmentModel>;
 
   @Input() public refreshLayout!: boolean;
 
@@ -44,6 +47,9 @@ export class GridLayoutComponent implements OnChanges {
   /** Holds all the observation definitions used  by created value flag components */
   protected observationsDefinitions!: ObservationEntry[][];
 
+  /** Holds precomputed visual classes for each rendered grid cell */
+  protected observationCellClasses: string[][] = [];
+
   /** Holds the error message for total validation. Used by the total components of each column */
   protected totalErrorMessage!: string[];
 
@@ -62,11 +68,16 @@ export class GridLayoutComponent implements OnChanges {
       this.observationsDefinitions = this.formDefinitions.getObsEntriesForGridLayout();
       // Important to statically fill with undefined values for working with 'some' and 'every' array functions
       this.totalErrorMessage = new Array(this.colFieldDefinitions.length).fill(undefined);
+      this.updateObservationCellClasses();
     }
 
     if (changes["userFormSettings"] && this.userFormSettings) {
       // The height may not exist due to previous releases
       if (this.userFormSettings.gridLayoutSettings.height) this.layoutHeight = this.userFormSettings.gridLayoutSettings.height;
+    }
+
+    if (changes["observationAnomalyAssessmentsByKey"] && this.observationsDefinitions) {
+      this.updateObservationCellClasses();
     }
 
   }
@@ -101,6 +112,39 @@ export class GridLayoutComponent implements OnChanges {
 
   protected onCellSelected(observationDef: ObservationEntry): void {
     this.cellSelected.emit(observationDef);
+  }
+
+  private updateObservationCellClasses(): void {
+    this.observationCellClasses = this.observationsDefinitions.map((row) =>
+      row.map((observationDef) => this.getObservationCellClass(observationDef))
+    );
+  }
+
+  private getObservationCellClass(observationDef: ObservationEntry): string {
+    const observation = observationDef.observation;
+    const observationKey = [
+      observation.stationId,
+      observation.elementId,
+      observation.level,
+      observation.datetime,
+      observation.interval,
+      observation.sourceId,
+    ].join('|');
+    const assessment = this.observationAnomalyAssessmentsByKey?.get(observationKey);
+
+    if (!assessment) {
+      return '';
+    }
+
+    const classNames: string[] = [];
+
+    if (assessment.outcome !== 'not_applicable') {
+      classNames.push(`app-anomaly-outcome-${assessment.outcome}`);
+    }
+
+    classNames.push(`app-anomaly-severity-${assessment.severity}`);
+
+    return classNames.join(' ');
   }
 
   /**

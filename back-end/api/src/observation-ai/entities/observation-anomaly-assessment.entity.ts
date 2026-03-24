@@ -20,6 +20,23 @@ export enum ObservationAnomalyOutcomeEnum {
   NOT_APPLICABLE = "not_applicable",
 }
 
+export interface ObservationMlContributingSignal {
+  signal: string;
+  feature: string;
+  observedValue: number | string | null;
+  expectedValue: number | null;
+  contributionScore: number;
+  direction: "higher" | "lower" | "neutral";
+}
+
+export interface ObservationGenerativeExplanation {
+  summary: string;
+  abnormalPatterns: string[];
+  failedQcChecks: string[];
+  suggestedReviewerAction: string;
+  reviewerGuidance: string;
+}
+
 @Entity("observation_anomaly_assessments")
 @Index("IDX_obs_anomaly_assessment_lookup", ["stationId", "elementId", "level", "datetime", "interval", "sourceId"])
 export class ObservationAnomalyAssessmentEntity {
@@ -57,11 +74,17 @@ export class ObservationAnomalyAssessmentEntity {
   @Column({ name: "model_id", type: "varchar" })
   modelId: string;
 
+  @Column({ name: "model_family", type: "varchar", default: "seasonal_gaussian_ensemble" })
+  modelFamily: string;
+
   @Column({ name: "model_version", type: "varchar" })
   modelVersion: string;
 
   @Column({ name: "anomaly_score", type: "float" })
   anomalyScore: number;
+
+  @Column({ name: "confidence_score", type: "float", nullable: true })
+  confidenceScore: number | null;
 
   @Column({ name: "severity", type: "enum", enum: ObservationAnomalySeverityEnum })
   severity: ObservationAnomalySeverityEnum;
@@ -75,6 +98,12 @@ export class ObservationAnomalyAssessmentEntity {
 
   @Column({ name: "feature_snapshot", type: "jsonb", nullable: true })
   featureSnapshot: Record<string, number | string | null> | null;
+
+  @Column({ name: "contributing_signals", type: "jsonb", nullable: true })
+  contributingSignals: ObservationMlContributingSignal[] | null;
+
+  @Column({ name: "generative_explanation", type: "jsonb", nullable: true })
+  generativeExplanation: ObservationGenerativeExplanation | null;
 
   @Column({ name: "created_by_user_id", type: "int", nullable: true })
   @Index()

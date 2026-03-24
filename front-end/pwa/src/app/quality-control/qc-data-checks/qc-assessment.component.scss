@@ -1,3 +1,132 @@
-.group-row-border {
-    border-bottom: 2px solid #000;
+.qc-assessment-shell {
+  display: grid;
+  gap: .9rem;
+}
+
+.qc-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .75rem;
+}
+
+.qc-workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(20rem, .95fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.qc-table-wrap {
+  max-height: 70vh;
+}
+
+.qc-explanation-cell {
+  min-width: 15rem;
+  color: #52606d;
+}
+
+.qc-empty-state {
+  display: grid;
+  justify-items: center;
+  gap: .35rem;
+  text-align: center;
+}
+
+.qc-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: .75rem;
+  background: #edf3ee;
+  color: #2f5d50;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.detail-kv-grid,
+.detail-status-card {
+  display: grid;
+  gap: .5rem;
+}
+
+.detail-kv-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-status-card {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-kv-item,
+.detail-status-item {
+  display: grid;
+  gap: .15rem;
+  padding: .45rem .55rem;
+  border: 1px solid #e2e6de;
+  border-radius: .45rem;
+  background: #fafbf8;
+}
+
+.detail-kv-item-wide {
+  grid-column: 1 / -1;
+}
+
+.detail-kv-label {
+  color: #617164;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.detail-kv-value {
+  color: #213328;
+  font-size: .84rem;
+  font-weight: 600;
+}
+
+.detail-compact-list {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.detail-compact-list li {
+  margin-bottom: .3rem;
+  font-size: .84rem;
+}
+
+.detail-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+}
+
+.detail-signal-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: .22rem .5rem;
+  border-radius: 999px;
+  background: #edf3ee;
+  color: #2f5d50;
+  font-size: .76rem;
+  font-weight: 600;
+}
+
+@media (max-width: 1199px) {
+  .qc-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .qc-workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 767px) {
+  .qc-summary-grid,
+  .detail-kv-grid,
+  .detail-status-card {
+    grid-template-columns: 1fr;
+  }
+}

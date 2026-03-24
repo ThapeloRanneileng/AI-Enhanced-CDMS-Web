@@ -1,53 +1,107 @@
-<div class="card border-0 p-0">
-    <div *ngIf="displayFilterHeader" class="card-header mb-2 px-1 fw-bold">
-        <app-toggle-chevron [(open)]="displayFilterControls">Filter</app-toggle-chevron>
-    </div>
-    <div *ngIf="displayFilterControls" class="card-body p-0 mt-2">
-        <div class="d-flex justify-content-between align-items-end">
-            <div class="row g-2 px-2">
-                <div *ngIf="displayStationSelector" class="col-auto mb-2">
-                    <app-station-selector-multiple [label]="'Stations'" [(selectedIds)]="stationIds"
-                        [includeOnlyIds]="includeOnlyStationIds" />
-                </div>
-
-                <div *ngIf="displayElementSelector" class="col-auto mb-2">
-                    <app-element-selector-multiple [label]="'Elements'" [(selectedIds)]="elementIds" />
-                </div>
-
-                <div *ngIf="displayLevelSelector" class="col-auto mb-2">
-                    <app-number-input [label]="'Level'" [(value)]="level" />
-                </div>
-
-                <div *ngIf="displayIntervalSelector" class="col-auto mb-2">
-                    <app-interval-selector-multiple [label]="'Interval'"  [(selectedIds)]="intervals" />
-                </div>
-
-                <div *ngIf="displaySourceSelector" class="col-auto mb-2">
-                    <app-source-selector-multiple [label]="'Sources'" [(selectedIds)]="sourceIds" />
-                </div>
-
-                <div *ngIf="displayObservationDateSelector ||  displayEntryDateSelector" class="col-auto mb-2">
-                    <div *ngIf="displayObservationDateSelector && displayEntryDateSelector" class="row">
-                        <div class="col-auto">
-                            <app-radio-buttons-input [inline]="true" [asButtons]="false" [groupName]="'filter_dates'"
-                                [groupItems]="[{ label:'Observation Date', checked:  true},{ label:'Entry Date'}]"
-                                (checkedValueChange)="onDateToUseSelection($event)" />
-                        </div>
-                    </div>
-
-                    <div class="row">
-                        <app-date-range-input [id]="'observation_or_entry_date'" [(value)]="dateRange" />
-                    </div>
-
-                </div>
+<div class="card border-0 p-0" [class.workspace-filter-shell]="layoutMode === 'workspace'">
+    <ng-container *ngIf="layoutMode === 'workspace'; else defaultFilterLayout">
+        <div class="workspace-filter-bar">
+            <div *ngIf="displayObservationDateSelector || displayEntryDateSelector" class="workspace-field workspace-date">
+                <label class="workspace-label">Date Range</label>
+                <app-date-range-input [id]="'observation_or_entry_date'" [(value)]="dateRange" />
             </div>
 
-            <div>
+            <div *ngIf="displayStationSelector" class="workspace-field">
+                <app-station-selector-multiple [label]="'Station'" [(selectedIds)]="stationIds"
+                    [includeOnlyIds]="includeOnlyStationIds" />
+            </div>
+
+            <div *ngIf="displayElementSelector" class="workspace-field">
+                <app-element-selector-multiple [label]="'Element'" [(selectedIds)]="elementIds" />
+            </div>
+
+            <div class="workspace-actions">
                 <button type="button" class="btn btn-outline-secondary btn-sm"
+                    (click)="toggleAdvancedFilters()">
+                    {{ advancedToggleLabel }}
+                </button>
+                <button type="button" class="btn btn-sm btn-dark"
                     [disabled]=" !queryAllowed || !enableQueryButton " (click)="onQueryClick()">
-                    Query
+                    {{ queryButtonLabel }}
                 </button>
             </div>
         </div>
-    </div>
+
+        <div *ngIf="displayFilterControls" class="workspace-advanced-panel">
+            <div class="workspace-advanced-grid">
+                <div *ngIf="displayLevelSelector" class="workspace-advanced-field">
+                    <app-number-input [label]="'Level'" [(value)]="level" />
+                </div>
+
+                <div *ngIf="displayIntervalSelector" class="workspace-advanced-field">
+                    <app-interval-selector-multiple [label]="'Interval'" [(selectedIds)]="intervals" />
+                </div>
+
+                <div *ngIf="displaySourceSelector" class="workspace-advanced-field">
+                    <app-source-selector-multiple [label]="'Sources'" [(selectedIds)]="sourceIds" />
+                </div>
+
+                <div *ngIf="displayObservationDateSelector && displayEntryDateSelector" class="workspace-advanced-field workspace-date-mode">
+                    <label class="workspace-label">Date Selector</label>
+                    <app-radio-buttons-input [inline]="true" [asButtons]="false" [groupName]="'filter_dates'"
+                        [groupItems]="[{ label:'Observation Date', checked:  true},{ label:'Entry Date'}]"
+                        (checkedValueChange)="onDateToUseSelection($event)" />
+                </div>
+            </div>
+        </div>
+    </ng-container>
+
+    <ng-template #defaultFilterLayout>
+        <div *ngIf="displayFilterHeader" class="card-header mb-2 px-1 fw-bold">
+            <app-toggle-chevron [(open)]="displayFilterControls">Filter</app-toggle-chevron>
+        </div>
+        <div *ngIf="displayFilterControls" class="card-body p-0 mt-2">
+            <div class="d-flex justify-content-between align-items-end">
+                <div class="row g-2 px-2">
+                    <div *ngIf="displayStationSelector" class="col-auto mb-2">
+                        <app-station-selector-multiple [label]="'Stations'" [(selectedIds)]="stationIds"
+                            [includeOnlyIds]="includeOnlyStationIds" />
+                    </div>
+
+                    <div *ngIf="displayElementSelector" class="col-auto mb-2">
+                        <app-element-selector-multiple [label]="'Elements'" [(selectedIds)]="elementIds" />
+                    </div>
+
+                    <div *ngIf="displayLevelSelector" class="col-auto mb-2">
+                        <app-number-input [label]="'Level'" [(value)]="level" />
+                    </div>
+
+                    <div *ngIf="displayIntervalSelector" class="col-auto mb-2">
+                        <app-interval-selector-multiple [label]="'Interval'"  [(selectedIds)]="intervals" />
+                    </div>
+
+                    <div *ngIf="displaySourceSelector" class="col-auto mb-2">
+                        <app-source-selector-multiple [label]="'Sources'" [(selectedIds)]="sourceIds" />
+                    </div>
+
+                    <div *ngIf="displayObservationDateSelector ||  displayEntryDateSelector" class="col-auto mb-2">
+                        <div *ngIf="displayObservationDateSelector && displayEntryDateSelector" class="row">
+                            <div class="col-auto">
+                                <app-radio-buttons-input [inline]="true" [asButtons]="false" [groupName]="'filter_dates'"
+                                    [groupItems]="[{ label:'Observation Date', checked:  true},{ label:'Entry Date'}]"
+                                    (checkedValueChange)="onDateToUseSelection($event)" />
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <app-date-range-input [id]="'observation_or_entry_date'" [(value)]="dateRange" />
+                        </div>
+
+                    </div>
+                </div>
+
+                <div>
+                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                        [disabled]=" !queryAllowed || !enableQueryButton " (click)="onQueryClick()">
+                        {{ queryButtonLabel }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </ng-template>
 </div>

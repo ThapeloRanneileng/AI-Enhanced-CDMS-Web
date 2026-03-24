@@ -48,17 +48,17 @@ export class PerformQCDialogComponent {
 
   protected onOkClick(): void {
     if (!this.qcSelection.fromDate) {
-      this.pagesDataService.showToast({ title: 'QC Assessment', message: 'From date selection required', type: ToastEventTypeEnum.ERROR });
+      this.pagesDataService.showToast({ title: 'QC Review Workspace', message: 'From date selection required', type: ToastEventTypeEnum.ERROR });
       return;
     }
 
     if (!this.qcSelection.toDate) {
-      this.pagesDataService.showToast({ title: 'QC Assessment', message: 'To date selection required', type: ToastEventTypeEnum.ERROR });
+      this.pagesDataService.showToast({ title: 'QC Review Workspace', message: 'To date selection required', type: ToastEventTypeEnum.ERROR });
       return;
     }
 
     if (DateUtils.isMoreThanMaxCalendarYears(new Date(this.qcSelection.fromDate), new Date(this.qcSelection.toDate), 11)) {
-      this.pagesDataService.showToast({ title: 'QC Assessment', message: 'Date range exceeds 10 years', type: ToastEventTypeEnum.ERROR });
+      this.pagesDataService.showToast({ title: 'QC Review Workspace', message: 'Date range exceeds 10 years', type: ToastEventTypeEnum.ERROR });
       return;
     }
     this.qcAssessmentsService.performQC(this.qcSelection).pipe(
@@ -67,9 +67,9 @@ export class PerformQCDialogComponent {
       next: data => {
         this.open = false;
         if (data.qcFails > 0) {
-          this.pagesDataService.showToast({ title: 'QC Assessment', message: `Some observations failed qc tests`, type: ToastEventTypeEnum.WARNING });
+          this.pagesDataService.showToast({ title: 'QC Review Workspace', message: `Some observations failed qc tests`, type: ToastEventTypeEnum.WARNING });
         } else {
-          this.pagesDataService.showToast({ title: 'QC Assessment', message: `No observation failed qc tests`, type: ToastEventTypeEnum.SUCCESS });
+          this.pagesDataService.showToast({ title: 'QC Review Workspace', message: `No observation failed qc tests`, type: ToastEventTypeEnum.SUCCESS });
         }
         this.ok.emit();
       },

@@ -19,6 +19,9 @@ import { CachedMetadataService } from 'src/app/metadata/metadata-updates/cached-
 export class QuerySelectionComponent implements OnChanges, OnDestroy {
   @Input() public parentComponentName!: string;
   @Input() public enableQueryButton: boolean = true;
+  @Input() public layoutMode: 'default' | 'workspace' = 'default';
+  @Input() public queryButtonLabel: string = 'Query';
+  @Input() public advancedToggleLabel: string = 'Advanced Filters';
   @Input() public displayStationSelector: boolean = true;
   @Input() public displayElementSelector: boolean = true;
   @Input() public displaySourceSelector: boolean = true;
@@ -71,6 +74,9 @@ export class QuerySelectionComponent implements OnChanges, OnDestroy {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['layoutMode'] && this.layoutMode === 'workspace' && changes['layoutMode'].firstChange) {
+      this.displayFilterControls = false;
+    }
 
     if (changes['parentComponentName'] && this.parentComponentName) {
       this.setStationsAllowed();
@@ -183,6 +189,10 @@ export class QuerySelectionComponent implements OnChanges, OnDestroy {
 
     // Emit the new filter parameters
     this.queryClick.emit(this.outputFilter);
+  }
+
+  protected toggleAdvancedFilters(): void {
+    this.displayFilterControls = !this.displayFilterControls;
   }
 
   // TODO.

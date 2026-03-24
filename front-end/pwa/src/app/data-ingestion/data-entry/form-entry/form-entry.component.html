@@ -80,6 +80,7 @@
           <div *ngIf="formDefinitions.formMetadata.layout === 'GRID'">
             <app-grid-layout #appGridLayout [userFormSettings]="userFormSettings" [formDefinitions]="formDefinitions"
               [refreshLayout]="refreshLayout" [duplicateObservations]="duplicateObservations"
+              [observationAnomalyAssessmentsByKey]="observationAnomalyAssessmentsByKey"
               (totalIsValid)="onTotalIsValid($event)" (userInputVF)="onUserInputVF($event)"
               (cellSelected)="onGridCellSelected($event)"
               (focusSaveButton)="onFocusSaveButton()">
@@ -87,12 +88,15 @@
 
             <div *ngIf="selectedGridObservation" class="card border-0 mt-3 ai-anomaly-panel">
               <div class="card-header py-2 px-3 d-flex justify-content-between align-items-center">
-                <div class="fw-bold">AI Anomaly</div>
+                <div class="fw-bold">AI Contextual Hint</div>
                 <div class="small text-muted">
                   {{ selectedObservationElementName }} • {{ selectedGridObservation.observation.datetime }}
                 </div>
               </div>
               <div class="card-body p-3">
+                <div class="small text-muted mb-3">
+                  Advisory only. Final QC review and decisioning happens in the QC Review Workspace.
+                </div>
                 <div *ngIf="isSelectedObservationAnomalyLoading" class="text-muted">
                   Loading AI anomaly assessment...
                 </div>
@@ -108,40 +112,6 @@
                 </div>
 
                 <div *ngIf="selectedObservationAnomalyAssessment" class="row g-3">
-                  <div class="col-12">
-                    <div class="small text-muted mb-2">Operator Review</div>
-                    <div class="d-flex flex-wrap gap-2">
-                      <button type="button" class="btn btn-sm"
-                        [class.btn-success]="selectedObservationReview?.status === 'accepted'"
-                        [class.btn-outline-success]="selectedObservationReview?.status !== 'accepted'"
-                        [disabled]="isSavingSelectedObservationReview"
-                        (click)="onSelectedObservationReview('accepted')">
-                        Accept
-                      </button>
-                      <button type="button" class="btn btn-sm"
-                        [class.btn-warning]="selectedObservationReview?.status === 'overridden'"
-                        [class.btn-outline-warning]="selectedObservationReview?.status !== 'overridden'"
-                        [disabled]="isSavingSelectedObservationReview"
-                        (click)="onSelectedObservationReview('overridden')">
-                        Override
-                      </button>
-                      <button type="button" class="btn btn-sm"
-                        [class.btn-danger]="selectedObservationReview?.status === 'needs_investigation'"
-                        [class.btn-outline-danger]="selectedObservationReview?.status !== 'needs_investigation'"
-                        [disabled]="isSavingSelectedObservationReview"
-                        (click)="onSelectedObservationReview('needs_investigation')">
-                        Needs Investigation
-                      </button>
-                    </div>
-                    <div *ngIf="isSavingSelectedObservationReview" class="small text-muted mt-2">
-                      Saving review...
-                    </div>
-                    <div *ngIf="selectedObservationReview" class="small text-muted mt-2">
-                      Marked as {{ formatReviewStatus(selectedObservationReview.status) }}
-                      <span *ngIf="selectedObservationReview.reviewedByEmail">by {{ selectedObservationReview.reviewedByEmail }}</span>
-                      on {{ formattedSelectedObservationReviewAt }}
-                    </div>
-                  </div>
                   <div class="col-sm-6 col-lg-3">
                     <div class="small text-muted">Score</div>
                     <div class="fw-semibold">{{ formatAnomalyScore(selectedObservationAnomalyAssessment.anomalyScore) }}</div>

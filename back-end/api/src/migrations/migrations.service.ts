@@ -20,7 +20,7 @@ import { DataSource } from 'typeorm';
 
 @Injectable()
 export class MigrationsService {
-  private readonly SUPPORTED_DB_VERSION: string = '0.0.5'; // TODO. Should come from a versioning file. 
+  private readonly SUPPORTED_DB_VERSION: string = '0.0.6'; // TODO. Should come from a versioning file. 
   private readonly logger = new Logger(MigrationsService.name);
 
   constructor(
@@ -227,15 +227,36 @@ export class MigrationsService {
         source_id INT NOT NULL,
         assessment_type observation_anomaly_assessments_assessment_type_enum NOT NULL,
         model_id VARCHAR NOT NULL,
+        model_family VARCHAR NOT NULL DEFAULT 'seasonal_gaussian_ensemble',
         model_version VARCHAR NOT NULL,
         anomaly_score DOUBLE PRECISION NOT NULL,
+        confidence_score DOUBLE PRECISION NULL,
         severity observation_anomaly_assessments_severity_enum NOT NULL,
         outcome observation_anomaly_assessments_outcome_enum NOT NULL,
         reasons JSONB NULL,
         feature_snapshot JSONB NULL,
+        contributing_signals JSONB NULL,
+        generative_explanation JSONB NULL,
         created_by_user_id INT NULL REFERENCES users(id) ON DELETE RESTRICT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    `);
+
+    await this.dataSource.query(`
+      ALTER TABLE observation_anomaly_assessments
+      ADD COLUMN IF NOT EXISTS model_family VARCHAR NOT NULL DEFAULT 'seasonal_gaussian_ensemble';
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE observation_anomaly_assessments
+      ADD COLUMN IF NOT EXISTS confidence_score DOUBLE PRECISION NULL;
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE observation_anomaly_assessments
+      ADD COLUMN IF NOT EXISTS contributing_signals JSONB NULL;
+    `);
+    await this.dataSource.query(`
+      ALTER TABLE observation_anomaly_assessments
+      ADD COLUMN IF NOT EXISTS generative_explanation JSONB NULL;
     `);
 
     await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_obs_anomaly_assessment_station_id" ON observation_anomaly_assessments (station_id);`);

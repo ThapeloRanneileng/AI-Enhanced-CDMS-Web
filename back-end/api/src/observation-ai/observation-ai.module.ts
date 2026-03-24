@@ -10,6 +10,7 @@ import { ObservationAnomalyJobService } from './services/observation-anomaly-job
 import { ObservationAnomalyAssessmentsQueryService } from './services/observation-anomaly-assessments-query.service';
 import { ObservationAnomalyAssessmentsController } from './controllers/observation-anomaly-assessments.controller';
 import { UserModule } from 'src/user/user.module';
+import { ObservationGenerativeReviewAssistanceService } from './services/observation-generative-review-assistance.service';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { UserModule } from 'src/user/user.module';
     AnomalyFeatureBuilderService,
     AnomalyModelRegistryService,
     ObservationAnomalyDetectionService,
+    ObservationGenerativeReviewAssistanceService,
     ObservationAnomalyAssessmentService,
     ObservationAnomalyJobService,
     ObservationAnomalyAssessmentsQueryService,
@@ -31,6 +33,7 @@ import { UserModule } from 'src/user/user.module';
     AnomalyFeatureBuilderService,
     AnomalyModelRegistryService,
     ObservationAnomalyDetectionService,
+    ObservationGenerativeReviewAssistanceService,
     ObservationAnomalyAssessmentService,
     ObservationAnomalyAssessmentsQueryService,
   ]

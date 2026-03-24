@@ -39,6 +39,7 @@ export enum UserAppStateEnum {
   DATA_ENTRY_STATION_SELECTION = "data_entry_station_selection",
   ENTRY_FORM_SETTINGS = "form_settings", 
   OBSERVATION_ANOMALY_REVIEWS = "observation_anomaly_reviews",
+  QC_ASSESSMENT_REVIEWS = "qc_assessment_reviews",
 }
 
 export interface AppComponentState {

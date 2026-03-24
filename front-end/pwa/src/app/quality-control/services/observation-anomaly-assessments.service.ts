@@ -23,7 +23,7 @@ export class ObservationAnomalyAssessmentsService {
 
   public find(query: ViewObservationAnomalyAssessmentQueryModel): Observable<ViewObservationAnomalyAssessmentModel[]> {
     return this.http.get<ViewObservationAnomalyAssessmentModel[]>(
-      `${this.endPointUrl}`,
+      `${this.endPointUrl}/review-workspace`,
       { params: StringUtils.getQueryParams<ViewObservationAnomalyAssessmentQueryModel>(query) }
     ).pipe(
       catchError(AppAuthInterceptor.handleError)

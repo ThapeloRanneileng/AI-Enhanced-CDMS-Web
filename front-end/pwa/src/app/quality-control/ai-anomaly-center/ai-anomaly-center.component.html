@@ -1,0 +1,261 @@
+<div class="anomaly-center">
+    <section class="hero-panel">
+        <div>
+            <div class="eyebrow">AI-assisted quality control</div>
+            <h2>Enterprise anomaly review and decisioning</h2>
+            <p>
+                Triage high-risk observations, coordinate reviewer action, and maintain an auditable AI oversight trail
+                before data moves downstream.
+            </p>
+        </div>
+        <div class="hero-metrics">
+            <div class="hero-metric">
+                <span>Live queue</span>
+                <strong>{{ filteredAnomalies.length }}</strong>
+            </div>
+            <div class="hero-metric">
+                <span>Avg confidence</span>
+                <strong>{{ averageConfidence }}%</strong>
+            </div>
+        </div>
+    </section>
+
+    <section class="summary-grid">
+        <article class="summary-card summary-card-critical">
+            <span class="summary-label">Priority exposure</span>
+            <strong>{{ criticalExposureCount }}</strong>
+            <small>Critical and high-severity anomalies awaiting attention.</small>
+        </article>
+        <article class="summary-card">
+            <span class="summary-label">Active review</span>
+            <strong>{{ pendingCount }}</strong>
+            <small>Cases currently pending or in active reviewer workflow.</small>
+        </article>
+        <article class="summary-card">
+            <span class="summary-label">Escalated</span>
+            <strong>{{ escalatedCount }}</strong>
+            <small>Items routed to operations or specialist investigation.</small>
+        </article>
+        <article class="summary-card">
+            <span class="summary-label">Approval rate</span>
+            <strong>{{ approvalRate }}%</strong>
+            <small>Closed-case approval share across reviewed anomalies.</small>
+        </article>
+    </section>
+
+    <section class="workspace-grid">
+        <div class="queue-panel">
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-eyebrow">Anomaly work queue</div>
+                        <h3>Filterable review backlog</h3>
+                    </div>
+                    <div class="queue-count">{{ filteredAnomalies.length }} records</div>
+                </div>
+
+                <div class="filters-grid">
+                    <div class="filter-field filter-field-search">
+                        <label for="anomalySearch">Search</label>
+                        <input id="anomalySearch" type="text" class="form-control form-control-sm"
+                            [(ngModel)]="filters.search" placeholder="ID, station, element, anomaly type" />
+                    </div>
+                    <div class="filter-field">
+                        <label for="severityFilter">Severity</label>
+                        <select id="severityFilter" class="form-select form-select-sm" [(ngModel)]="filters.severity">
+                            <option *ngFor="let option of severityOptions" [ngValue]="option">{{ option }}</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label for="statusFilter">Review status</label>
+                        <select id="statusFilter" class="form-select form-select-sm" [(ngModel)]="filters.reviewStatus">
+                            <option *ngFor="let option of reviewStatusOptions" [ngValue]="option">{{ option }}</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label for="assignmentFilter">Assignment</label>
+                        <select id="assignmentFilter" class="form-select form-select-sm" [(ngModel)]="filters.assignment">
+                            <option *ngFor="let option of assignmentOptions" [ngValue]="option">{{ option }}</option>
+                        </select>
+                    </div>
+                    <div class="filter-field">
+                        <label for="regionFilter">Region</label>
+                        <select id="regionFilter" class="form-select form-select-sm" [(ngModel)]="filters.region">
+                            <option *ngFor="let option of regionOptions" [ngValue]="option">{{ option }}</option>
+                        </select>
+                    </div>
+                    <div class="filter-field filter-toggle">
+                        <label for="confidenceOnly">Confidence gate</label>
+                        <div class="form-check form-switch">
+                            <input id="confidenceOnly" class="form-check-input" type="checkbox"
+                                [(ngModel)]="filters.highConfidenceOnly" />
+                            <span>Show >= 90% confidence only</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-responsive queue-table">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Case</th>
+                                <th>Station / Element</th>
+                                <th>Severity</th>
+                                <th>Status</th>
+                                <th>Confidence</th>
+                                <th>Assigned</th>
+                                <th>SLA</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr *ngFor="let anomaly of filteredAnomalies" (click)="selectAnomaly(anomaly.id)"
+                                class="app-cursor-pointer"
+                                [class.selected-row]="anomaly.id === selectedAnomalyId">
+                                <td>
+                                    <div class="case-id">{{ anomaly.id }}</div>
+                                    <small>{{ anomaly.observedAt }}</small>
+                                </td>
+                                <td>
+                                    <div>{{ anomaly.stationName }}</div>
+                                    <small>{{ anomaly.stationId }} / {{ anomaly.element }}</small>
+                                </td>
+                                <td>
+                                    <span class="pill" [ngClass]="getSeverityClass(anomaly.severity)">
+                                        {{ anomaly.severity }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="pill" [ngClass]="getStatusClass(anomaly.reviewStatus)">
+                                        {{ anomaly.reviewStatus }}
+                                    </span>
+                                </td>
+                                <td>{{ anomaly.confidence }}%</td>
+                                <td>{{ anomaly.assignedTo }}</td>
+                                <td>{{ anomaly.workflowSla }}</td>
+                            </tr>
+                            <tr *ngIf="filteredAnomalies.length === 0">
+                                <td colspan="7" class="text-center py-4 text-muted">
+                                    No anomalies match the current queue filters.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <aside class="details-panel" *ngIf="selectedAnomaly as anomaly">
+            <div class="panel-card details-card">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-eyebrow">Review status</div>
+                        <h3>{{ anomaly.id }}</h3>
+                    </div>
+                    <span class="pill" [ngClass]="getStatusClass(anomaly.reviewStatus)">{{ anomaly.reviewStatus }}</span>
+                </div>
+
+                <div class="detail-topline">
+                    <div>
+                        <strong>{{ anomaly.stationName }}</strong>
+                        <span>{{ anomaly.stationId }} · {{ anomaly.element }}</span>
+                    </div>
+                    <div class="confidence-chip">{{ anomaly.confidence }}% AI confidence</div>
+                </div>
+
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <label>Anomaly type</label>
+                        <span>{{ anomaly.anomalyType }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Observed</label>
+                        <span>{{ anomaly.observedAt }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Observed value</label>
+                        <span>{{ anomaly.observationValue }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Expected range</label>
+                        <span>{{ anomaly.baselineRange }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>AI model</label>
+                        <span>{{ anomaly.aiModel }}</span>
+                    </div>
+                    <div class="detail-item">
+                        <label>Source</label>
+                        <span>{{ anomaly.source }}</span>
+                    </div>
+                </div>
+
+                <div class="impact-panel">
+                    <div>
+                        <div class="section-title">Operational impact</div>
+                        <p>{{ anomaly.impactSummary }}</p>
+                    </div>
+                    <div>
+                        <div class="section-title">Recommended workflow</div>
+                        <p>{{ anomaly.recommendedAction }}</p>
+                    </div>
+                </div>
+
+                <div class="signal-grid">
+                    <div class="signal-card" *ngFor="let signal of anomaly.signals">
+                        <span>{{ signal.label }}</span>
+                        <strong>{{ signal.value }}</strong>
+                    </div>
+                </div>
+
+                <div class="assignment-row">
+                    <div class="assignment-field">
+                        <label for="reviewerAssign">Assign reviewer</label>
+                        <select id="reviewerAssign" class="form-select form-select-sm" [ngModel]="anomaly.assignedTo"
+                            (ngModelChange)="assignSelected($event)">
+                            <option *ngFor="let reviewer of reviewers" [ngValue]="reviewer">{{ reviewer }}</option>
+                        </select>
+                    </div>
+                    <div class="assignment-field">
+                        <label>Reviewer decision</label>
+                        <div class="decision-state">{{ anomaly.reviewerDecision }}</div>
+                    </div>
+                </div>
+
+                <div class="notes-block">
+                    <div class="notes-header">
+                        <div class="section-title">Reviewer notes</div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" (click)="saveNotes()">
+                            Save Notes
+                        </button>
+                    </div>
+                    <textarea rows="5" class="form-control" [(ngModel)]="noteDraft"
+                        placeholder="Capture validation evidence, override rationale, or escalation context."></textarea>
+                </div>
+
+                <div class="action-row">
+                    <button type="button" class="btn btn-sm btn-outline-success" (click)="approveSelected()">
+                        Approve
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-warning" (click)="overrideSelected()">
+                        Override
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" (click)="escalateSelected()">
+                        Escalate
+                    </button>
+                </div>
+
+                <div class="timeline-block">
+                    <div class="section-title">Audit trail</div>
+                    <div class="timeline-item" *ngFor="let item of anomaly.activity">
+                        <div class="timeline-dot"></div>
+                        <div>
+                            <strong>{{ item.actor }}</strong>
+                            <div>{{ item.action }}</div>
+                            <small>{{ item.timestamp }}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </section>
+</div>

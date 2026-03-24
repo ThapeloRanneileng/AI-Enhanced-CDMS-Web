@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { ObservationEntity } from 'src/observation/entities/observation.entity';
 import { ObservationAnomalyAssessmentEntity, ObservationAnomalyAssessmentTypeEnum } from '../entities/observation-anomaly-assessment.entity';
 import { ObservationAnomalyDetectionResult, ObservationAnomalyDetectionService } from './observation-anomaly-detection.service';
+import { ObservationGenerativeReviewAssistanceService } from './observation-generative-review-assistance.service';
 
 @Injectable()
 export class ObservationAnomalyAssessmentService {
@@ -14,6 +15,7 @@ export class ObservationAnomalyAssessmentService {
     @InjectRepository(ObservationEntity) private observationRepo: Repository<ObservationEntity>,
     @InjectRepository(ObservationAnomalyAssessmentEntity) private anomalyAssessmentRepo: Repository<ObservationAnomalyAssessmentEntity>,
     private observationAnomalyDetectionService: ObservationAnomalyDetectionService,
+    private observationGenerativeReviewAssistanceService: ObservationGenerativeReviewAssistanceService,
     private eventEmitter: EventEmitter2,
   ) { }
 
@@ -23,6 +25,7 @@ export class ObservationAnomalyAssessmentService {
     userId: number | null = null,
   ): Promise<ObservationAnomalyAssessmentEntity> {
     const detectionResult: ObservationAnomalyDetectionResult = await this.observationAnomalyDetectionService.detectObservationAnomaly(observation);
+    const generativeExplanation = this.observationGenerativeReviewAssistanceService.generateExplanation(observation, detectionResult);
     const assessment = this.anomalyAssessmentRepo.create({
       stationId: observation.stationId,
       elementId: observation.elementId,
@@ -32,17 +35,22 @@ export class ObservationAnomalyAssessmentService {
       sourceId: observation.sourceId,
       assessmentType,
       modelId: detectionResult.modelId,
+      modelFamily: detectionResult.modelFamily,
       modelVersion: detectionResult.modelVersion,
       anomalyScore: detectionResult.anomalyScore,
+      confidenceScore: detectionResult.confidenceScore,
       severity: detectionResult.severity,
       outcome: detectionResult.outcome,
       reasons: detectionResult.reasons,
       featureSnapshot: detectionResult.featureSnapshot,
+      contributingSignals: detectionResult.contributingSignals,
+      generativeExplanation,
       createdByUserId: userId,
     });
 
     const savedAssessment = await this.anomalyAssessmentRepo.save(assessment);
     this.logger.log(`Saved anomaly assessment row ${savedAssessment.id} for ${savedAssessment.stationId}/${savedAssessment.elementId}/${savedAssessment.datetime.toISOString()}`);
+    this.eventEmitter.emit('observations.ml-anomaly-assessed');
     this.eventEmitter.emit('observations.ai-quality-controlled');
 
     return savedAssessment;

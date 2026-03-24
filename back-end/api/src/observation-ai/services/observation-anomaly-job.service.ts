@@ -30,6 +30,6 @@ export class ObservationAnomalyJobService {
 
   @OnEvent('observations.quality-controlled')
   async handleObservationsQualityControlled() {
-    this.logger.log('Received observations.quality-controlled event for AI anomaly follow-up');
+    this.logger.log('Received observations.quality-controlled event for ML anomaly detection and generative review assistance follow-up');
   }
 }

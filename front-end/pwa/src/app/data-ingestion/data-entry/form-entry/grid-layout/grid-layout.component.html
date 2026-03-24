@@ -22,7 +22,8 @@
                     </td>
 
                     <!-- cell for values -->
-                    <td class="px-1 py-1 m-0" *ngFor="let colDef of colFieldDefinitions; let colIndex=index;">
+                    <td class="px-1 py-1 m-0 app-grid-value-cell" *ngFor="let colDef of colFieldDefinitions; let colIndex=index;"
+                        [ngClass]="observationCellClasses[rowIndex]?.[colIndex]">
                         <div class="app-value-flag-container">
                             <app-value-flag-input [id]="rowDef.id +'-'+ colDef.id"
                                 [borderSize]="userFormSettings.fieldsBorderSize"
