@@ -130,12 +130,15 @@ export class FormEntryComponent implements OnInit, OnDestroy {
    * Used to determine whether to display hour selector
    */
   protected displayHourSelector: boolean = false;
+  protected displayStationSelector: boolean = false;
 
   // Key is `elementId-datetime`
   protected duplicateObservations: Map<string, ViewObservationModel> = new Map<string, ViewObservationModel>();
   protected observationAnomalyAssessmentsByKey: Map<string, ViewObservationAnomalyAssessmentModel> = new Map<string, ViewObservationAnomalyAssessmentModel>();
 
   protected observationEntries: ObservationEntry[] = [];
+  protected isPreparingLayout: boolean = false;
+  protected layoutErrorMessage: string = '';
   protected selectedGridObservation: ObservationEntry | null = null;
   protected selectedObservationAnomalyAssessment: ViewObservationAnomalyAssessmentModel | null = null;
   protected isSelectedObservationAnomalyLoading: boolean = false;
@@ -145,6 +148,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected anomalyRefreshLogMessage: string = '';
 
   private currentUserEmail: string = '';
+  private layoutLoadVersion: number = 0;
 
   private destroy$ = new Subject<void>();
 
@@ -190,7 +194,11 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       this.source = this.cachedMetadataService.getSource(sourceId);
       this.formDefinitions = new FormEntryDefinition(this.station, this.source, this.cachedMetadataService);
 
-      this.loadObservations();
+      if (this.hasUsableFormMetadata()) {
+        this.loadObservations();
+      } else {
+        this.layoutErrorMessage = 'This form has no configured entry fields or elements.';
+      }
 
       /** Gets default date value (YYYY-MM-DD) used by date selector */
       const date: Date = new Date()
@@ -208,10 +216,11 @@ export class FormEntryComponent implements OnInit, OnDestroy {
         this.displayYearMonthSelector = true; // If day is not included then use the year month selector
       }
       this.displayHourSelector = this.formDefinitions.hourSelectorValue !== null;
+      this.displayStationSelector = this.shouldDisplayStationSelector();
       //-----------------------------------------------------
 
 
-      if (this.shouldDisplayStationSelector()) {
+      if (this.displayStationSelector) {
         // Get the station ids assigned to use the form
         this.stationFormsService.getStationsAssignedToUseForm(sourceId).pipe(
           takeUntil(this.destroy$),
@@ -239,9 +248,12 @@ export class FormEntryComponent implements OnInit, OnDestroy {
    * Loads any existing observations from the database
    */
   private loadObservations(options?: ObservationLoadOptions): void {
+    const currentLoadVersion = ++this.layoutLoadVersion;
     // Reset controls
     this.totalIsValid = false;
     this.refreshLayout = false;
+    this.isPreparingLayout = true;
+    this.layoutErrorMessage = '';
     this.observationEntries = [];
     this.duplicateObservations = new Map<string, ViewObservationModel>();
     this.observationAnomalyAssessmentsByKey = new Map<string, ViewObservationAnomalyAssessmentModel>();
@@ -253,24 +265,45 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     const entryFormObsQuery: EntryFormObservationQueryModel = this.formDefinitions.createObservationQuery();
     this.observationService.findEntryFormData(entryFormObsQuery).pipe(
       take(1),
-    ).subscribe(data => {
-      this.observationEntries = this.formDefinitions.createObsEntries(data);
-      this.refreshLayout = true;
-      // Set firts value flag to have focus ready for rapid data entry
-      if (this.linearLayoutComponent) this.linearLayoutComponent.setFocusToFirstVF();
-      if (this.gridLayoutComponent) this.gridLayoutComponent.setFocusToFirstVF();
+    ).subscribe({
+      next: data => {
+        setTimeout(() => {
+          if (currentLoadVersion !== this.layoutLoadVersion) {
+            return;
+          }
 
-      // If double data entry is not allowed then fetch duplicates so that value flag component can prevent double data entry
-      if (!this.formDefinitions.formMetadata.allowDoubleDataEntry) {
-        this.loadDuplicates(entryFormObsQuery);
-      }
+          this.observationEntries = this.formDefinitions.createObsEntries(data);
+          this.refreshLayout = true;
+          this.isPreparingLayout = false;
 
-      void this.loadVisibleObservationAnomalyAssessments(entryFormObsQuery);
+          // Set firts value flag to have focus ready for rapid data entry
+          if (this.linearLayoutComponent) this.linearLayoutComponent.setFocusToFirstVF();
+          if (this.gridLayoutComponent) this.gridLayoutComponent.setFocusToFirstVF();
 
-      if (options?.selectedObservationKey || options?.postSaveObservationKeys?.length) {
-        this.restoreSelectedObservationAfterLoad(options);
+          // If double data entry is not allowed then fetch duplicates so that value flag component can prevent double data entry
+          if (!this.formDefinitions.formMetadata.allowDoubleDataEntry) {
+            this.loadDuplicates(entryFormObsQuery);
+          }
+
+          void this.loadVisibleObservationAnomalyAssessments(entryFormObsQuery);
+
+          if (options?.selectedObservationKey || options?.postSaveObservationKeys?.length) {
+            this.restoreSelectedObservationAfterLoad(options);
+          }
+        }, 0);
+      },
+      error: err => {
+        if (currentLoadVersion !== this.layoutLoadVersion) {
+          return;
+        }
+        this.isPreparingLayout = false;
+        this.layoutErrorMessage = err?.error?.message || err?.message || 'Form data could not be loaded.';
       }
     });
+  }
+
+  protected hasUsableFormMetadata(): boolean {
+    return !!this.formDefinitions?.formMetadata?.fields?.length && !!this.formDefinitions?.formMetadata?.elementIds?.length;
   }
 
   private loadDuplicates(entryFormObsQuery: EntryFormObservationQueryModel): void {

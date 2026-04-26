@@ -40,6 +40,10 @@ export class LinearLayoutComponent implements OnChanges, OnDestroy {
   /** Holds a copy of the entry fields in chunks of 5. Suitable for large screen displays */
   protected fieldDefinitionsChunks!: FieldEntryDefinition[][];
 
+  protected fieldEntryDefinitions!: { fieldDef: FieldEntryDefinition, observationDef: ObservationEntry }[];
+
+  protected fieldEntryDefinitionChunks!: { fieldDef: FieldEntryDefinition, observationDef: ObservationEntry }[][];
+
   /** Holds all the observation definitions used  by created value flag components */
   protected observationsDefinitions!: ObservationEntry[];
 
@@ -63,14 +67,14 @@ export class LinearLayoutComponent implements OnChanges, OnDestroy {
     if (changes["refreshLayout"] && this.refreshLayout) {
       // Set up the field definitions for both layouts and the observation definitions for value flag components
       this.fieldDefinitions = this.formDefinitions.getEntryFieldDefs(this.formDefinitions.formMetadata.fields[0]);
-      this.fieldDefinitionsChunks = this.getFieldDefsChunks(this.fieldDefinitions);
       this.observationsDefinitions = this.formDefinitions.getObsEntriesForLinearLayout();
+      this.setFieldEntryDefinitions();
     }
 
     if (changes["userFormSettings"] && this.userFormSettings) {
       if (this.fieldDefinitions) {
         // Setting change could be related to maximum rows so reinitialise the chunks
-        this.fieldDefinitionsChunks = this.getFieldDefsChunks(this.fieldDefinitions);
+        this.setFieldEntryDefinitions();
       }
     }
   }
@@ -85,8 +89,8 @@ export class LinearLayoutComponent implements OnChanges, OnDestroy {
    * @param fieldDefs 
    * @returns 
    */
-  private getFieldDefsChunks(fieldDefs: FieldEntryDefinition[]): FieldEntryDefinition[][] {
-    const chunks: FieldEntryDefinition[][] = [];
+  private getFieldDefsChunks<T>(fieldDefs: T[]): T[][] {
+    const chunks: T[][] = [];
     const chunkSize: number = this.userFormSettings.linearLayoutSettings.maxRows;
     for (let i = 0; i < fieldDefs.length; i += chunkSize) {
       chunks.push(fieldDefs.slice(i, i + chunkSize));
@@ -94,24 +98,25 @@ export class LinearLayoutComponent implements OnChanges, OnDestroy {
     return chunks;
   }
 
-  /**
-  * Gets the observation definition of the specified entry field definition. 
-  * Used when using the fieldDefinitionsChunks
-  * @param fieldDef 
-  * @returns 
-  */
-  protected getObservationDefByFieldDef(fieldDef: FieldEntryDefinition): ObservationEntry {
-    const index = this.fieldDefinitions.findIndex(item => item === fieldDef);
-    return this.observationsDefinitions[index];
+  private setFieldEntryDefinitions(): void {
+    this.fieldDefinitionsChunks = this.getFieldDefsChunks(this.fieldDefinitions);
+    this.fieldEntryDefinitions = this.fieldDefinitions.map((fieldDef, index) => ({
+      fieldDef,
+      observationDef: this.observationsDefinitions[index],
+    })).filter(fieldEntryDefinition => !!fieldEntryDefinition.observationDef);
+    this.fieldEntryDefinitionChunks = this.getFieldDefsChunks(this.fieldEntryDefinitions);
   }
 
-  /**
-   * Gets the observation definition of the specified by indexn. 
-   * @param fieldDef 
-   * @returns 
-   */
-  protected getObservationDefByIndex(index: number): ObservationEntry {
-    return this.observationsDefinitions[index];
+  protected trackByFieldDefId(_index: number, fieldDef: FieldEntryDefinition): number {
+    return fieldDef.id;
+  }
+
+  protected trackByFieldEntryDefinition(_index: number, fieldEntryDefinition: { fieldDef: FieldEntryDefinition, observationDef: ObservationEntry }): string {
+    return `${fieldEntryDefinition.fieldDef.id}-${fieldEntryDefinition.observationDef.observation.datetime}`;
+  }
+
+  protected trackByChunkIndex(index: number): number {
+    return index;
   }
 
   /**

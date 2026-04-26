@@ -1,4 +1,4 @@
-import { FormSourceModel, SelectorFieldControlType } from "src/app/metadata/source-specifications/models/form-source.model";
+import { FormSourceModel, LayoutType, SelectorFieldControlType } from "src/app/metadata/source-specifications/models/form-source.model";
 import { DateUtils } from "src/app/shared/utils/date.utils";
 import { StringUtils } from "src/app/shared/utils/string.utils";
 import { ViewSourceModel } from "src/app/metadata/source-specifications/models/view-source.model";
@@ -55,11 +55,11 @@ export class FormEntryDefinition {
 
         this.station = station;
         this.source = source;
-        this.formMetadata = source.parameters as FormSourceModel;
+        this.formMetadata = this.normaliseFormMetadata(source.parameters as FormSourceModel);
         this.cachedMetadataSearchService = newCachedMetadataSearchService;
 
         // Set the selectors values based on defined selectors in the form metadata
-        this.elementSelectorValue = this.formMetadata.selectors.includes(SelectorFieldControlType.ELEMENT) ? this.formMetadata.elementIds[0] : null;
+        this.elementSelectorValue = this.formMetadata.selectors.includes(SelectorFieldControlType.ELEMENT) && this.formMetadata.elementIds.length > 0 ? this.formMetadata.elementIds[0] : null;
         const todayDate: Date = new Date();
         this.yearSelectorValue = todayDate.getFullYear();
         this.monthSelectorValue = todayDate.getMonth() + 1;
@@ -90,6 +90,33 @@ export class FormEntryDefinition {
 
     public getObsEntriesForGridLayout(): ObservationEntry[][] {
         return this._obsDefsForGridLayout;
+    }
+
+    private normaliseFormMetadata(formMetadata: FormSourceModel | null | undefined): FormSourceModel {
+        const metadata = formMetadata ?? {} as FormSourceModel;
+        const selectors = Array.isArray(metadata.selectors) ? metadata.selectors : [];
+        const elementIds = Array.isArray(metadata.elementIds) ? metadata.elementIds : [];
+        const hours = Array.isArray(metadata.hours) ? metadata.hours : [];
+        let fields = Array.isArray(metadata.fields) ? metadata.fields.filter(Boolean) : [];
+        let layout = metadata.layout;
+
+        if (fields.length === 0 && elementIds.length > 0) {
+            fields = [SelectorFieldControlType.ELEMENT];
+            layout = LayoutType.LINEAR;
+        }
+
+        if (fields.length < 2 && layout === 'GRID') {
+            layout = LayoutType.LINEAR;
+        }
+
+        return {
+            ...metadata,
+            selectors: selectors as [SelectorFieldControlType, SelectorFieldControlType?],
+            fields: fields as [SelectorFieldControlType, SelectorFieldControlType?],
+            elementIds,
+            hours,
+            layout,
+        };
     }
 
     /**
@@ -139,19 +166,29 @@ export class FormEntryDefinition {
             dbObservation.datetime = DateUtils.getDatetimesBasedOnUTCOffset(dbObservation.datetime, this.source.utcOffset, 'add');
         }
 
+        const dbObservationIndex = this.createDbObservationIndex(dbObservations);
+
         switch (this.formMetadata.layout) {
             case 'LINEAR':
-                this._obsDefsForLinearLayout = this.createObsEntriesForLinearLayout(dbObservations);
+                this._obsDefsForLinearLayout = this.createObsEntriesForLinearLayout(dbObservationIndex);
                 this._allObsDefs = this._obsDefsForLinearLayout;
                 break;
             case 'GRID':
-                this._obsDefsForGridLayout = this.createObsEntriesForGridLayout(dbObservations);
+                this._obsDefsForGridLayout = this.createObsEntriesForGridLayout(dbObservationIndex);
                 this._allObsDefs = this._obsDefsForGridLayout.flat();
                 break;
             default:
                 throw new Error("Developer error. Layout not supported");
         }
         return this.getAllObsEntries();
+    }
+
+    private createDbObservationIndex(dbObservations: ViewObservationModel[]): Map<string, ViewObservationModel> {
+        const dbObservationIndex = new Map<string, ViewObservationModel>();
+        for (const dbObservation of dbObservations) {
+            dbObservationIndex.set(this.getObservationIndexKey(dbObservation), dbObservation);
+        }
+        return dbObservationIndex;
     }
 
 
@@ -161,7 +198,7 @@ export class FormEntryDefinition {
      * @param dbObservations 
      * @returns the observations that will be used by the value flag controls in a linear layout
      */
-    private createObsEntriesForLinearLayout(dbObservations: ViewObservationModel[]): ObservationEntry[] {
+    private createObsEntriesForLinearLayout(dbObservationIndex: Map<string, ViewObservationModel>): ObservationEntry[] {
         const obsDefinitions: ObservationEntry[] = [];
         const entryField: SelectorFieldControlType = this.formMetadata.fields[0];
         const entryfieldDefs: FieldEntryDefinition[] = this.getEntryFieldDefs(entryField)
@@ -194,7 +231,7 @@ export class FormEntryDefinition {
 
             //Find the equivalent observation from the database. 
             //If it exists use it to create the observation definition
-            const dbObs: ViewObservationModel | null = this.findEquivalentDBObservation(newObs, dbObservations);
+            const dbObs: ViewObservationModel | null = this.findEquivalentDBObservation(newObs, dbObservationIndex);
 
             obsDefinitions.push({
                 observation: dbObs ? dbObs : newObs,
@@ -219,7 +256,7 @@ export class FormEntryDefinition {
      * Used by grid layout.
      * @returns observations that will be used by the value flag controls in a grid layout.
      */
-    private createObsEntriesForGridLayout(dbObservations: ViewObservationModel[]): ObservationEntry[][] {
+    private createObsEntriesForGridLayout(dbObservationIndex: Map<string, ViewObservationModel>): ObservationEntry[][] {
 
         if (this.formMetadata.fields.length < 2 || !this.formMetadata.fields[1]) {
             throw new Error("Developer error: number of entry fields not supported.");
@@ -272,7 +309,7 @@ export class FormEntryDefinition {
 
                 //Find the equivalent observation from the database. 
                 //If it exists use it to create the observation definition
-                const dbObs: ViewObservationModel | null = this.findEquivalentDBObservation(newObs, dbObservations);
+                const dbObs: ViewObservationModel | null = this.findEquivalentDBObservation(newObs, dbObservationIndex);
                 subArrEntryObservations.push({
                     observation: dbObs ? dbObs : newObs,
                     confirmAsCorrect: false,
@@ -318,7 +355,7 @@ export class FormEntryDefinition {
                 entryFieldDefs = DateUtils.getHours(this.formMetadata.hours);
                 break;
             default:
-                throw new Error("Developer Error: Entry Field Not Recognised");
+                entryFieldDefs = [];
         }
 
         return entryFieldDefs;
@@ -349,24 +386,28 @@ export class FormEntryDefinition {
 */
     private getObsDatetime(datetimeVars: [number, number, number, number]): string {
         let [year, month, day, hour] = datetimeVars;
+        if (day < 1) {
+            day = 1;
+        }
+        if (hour < 0) {
+            hour = 0;
+        }
         return `${year}-${StringUtils.addLeadingZero(month)}-${StringUtils.addLeadingZero(day)}T${StringUtils.addLeadingZero(hour)}:00:00.000Z`;
     }
 
 
-    private findEquivalentDBObservation(newObs: ViewObservationModel, dbObservations: ViewObservationModel[]): ViewObservationModel | null {
-        for (const dbObservation of dbObservations) {
-            // Look for the observation element id and date time.
-            if (
-                newObs.stationId === dbObservation.stationId &&
-                newObs.elementId === dbObservation.elementId &&
-                newObs.sourceId === dbObservation.sourceId &&
-                newObs.level === dbObservation.level &&
-                newObs.datetime === dbObservation.datetime
-            ) {
-                return dbObservation;
-            }
-        }
-        return null;
+    private findEquivalentDBObservation(newObs: ViewObservationModel, dbObservationIndex: Map<string, ViewObservationModel>): ViewObservationModel | null {
+        return dbObservationIndex.get(this.getObservationIndexKey(newObs)) ?? null;
+    }
+
+    private getObservationIndexKey(observation: ViewObservationModel): string {
+        return [
+            observation.stationId,
+            observation.elementId,
+            observation.sourceId,
+            observation.level,
+            observation.datetime,
+        ].join('|');
     }
 
     public static getTotalValuesOfObs(obsDefs: ObservationEntry[], cachedMetadataService: CachedMetadataService): number | null {
