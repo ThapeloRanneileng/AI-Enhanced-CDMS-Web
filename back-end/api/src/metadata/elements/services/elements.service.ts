@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ElementEntity } from '../../elements/entities/element.entity';
@@ -119,9 +119,16 @@ export class ElementsService implements OnModuleInit {
     }
 
     public async delete(id: number): Promise<number> {
-        await this.elementRepo.remove(await this.findEntity(id));
-        await this.invalidateCache();
-        return id;
+        try {
+            await this.elementRepo.remove(await this.findEntity(id));
+            await this.invalidateCache();
+            return id;
+        } catch (error: any) {
+            if (error?.code === '23503') {
+                throw new BadRequestException(`Element #${id} is already in use by source specifications, QC rules, observations, or other records and cannot be deleted.`);
+            }
+            throw error;
+        }
     }
 
     public async bulkPut(dtos: CreateViewElementDto[], userId: number) {

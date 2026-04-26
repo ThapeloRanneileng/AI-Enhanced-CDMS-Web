@@ -65,7 +65,7 @@ export class StationImportTransformer {
         userId?: number,
     ): Promise<PreviewError | void> {
 
-        const steps: { name: string; buildSql: () => string[] }[] = [
+        const transformSteps: { name: string; buildSql: () => string[] }[] = [
             { name: 'Id', buildSql: () => StationImportTransformer.buildAlterIdColumnSQL(tableName, mapping) },
             { name: 'Name', buildSql: () => StationImportTransformer.buildAlterNameColumnSQL(tableName, mapping) },
             { name: 'Description', buildSql: () => StationImportTransformer.buildAlterDescriptionColumnSQL(tableName, mapping) },
@@ -79,20 +79,9 @@ export class StationImportTransformer {
             { name: 'Status', buildSql: () => StationImportTransformer.buildAlterFieldMappingColumnSQL(tableName, StationImportTransformer.STATUS_PROPERTY, mapping.status) },
             { name: 'Date Established/Closed', buildSql: () => StationImportTransformer.buildAlterDatesColumnSQL(tableName, mapping) },
             { name: 'Comment', buildSql: () => StationImportTransformer.buildAlterCommentColumnSQL(tableName, mapping) },
-            {
-                name: 'Finalize',
-                buildSql: () => {
-                    return [
-                        `ALTER TABLE ${tableName} ADD COLUMN ${StationImportTransformer.ENTRY_USER_ID_PROPERTY} INTEGER DEFAULT ${userId || 'NULL'}`,
-                        StationImportTransformer.buildRemoveDuplicatesSQL(tableName),
-                        // Select only the final columns we need, discarding unmapped CSV columns
-                        `CREATE OR REPLACE TABLE ${tableName} AS SELECT ${StationImportTransformer.ALL_COLUMNS.join(', ')} FROM ${tableName}`,
-                    ];
-                }
-            },
         ];
 
-        for (const step of steps) {
+        for (const step of transformSteps) {
             try {
                 const sqls = step.buildSql();
                 if (sqls.length > 0) {
@@ -101,6 +90,24 @@ export class StationImportTransformer {
             } catch (error) {
                 return ImportErrorUtils.classifyDuckDbError(error, step.name);
             }
+        }
+
+        const validationError = await StationImportTransformer.validateLmsData(conn, tableName);
+        if (validationError) return validationError;
+
+        const finalizeStep = {
+            name: 'Finalize',
+            buildSql: () => [
+                `ALTER TABLE ${tableName} ADD COLUMN ${StationImportTransformer.ENTRY_USER_ID_PROPERTY} INTEGER DEFAULT ${userId || 'NULL'}`,
+                // Select only the final columns we need, discarding unmapped CSV columns
+                `CREATE OR REPLACE TABLE ${tableName} AS SELECT ${StationImportTransformer.ALL_COLUMNS.join(', ')} FROM ${tableName}`,
+            ],
+        };
+
+        try {
+            await conn.run(finalizeStep.buildSql().join('; '));
+        } catch (error) {
+            return ImportErrorUtils.classifyDuckDbError(error, finalizeStep.name);
         }
     }
 
@@ -301,19 +308,53 @@ export class StationImportTransformer {
         }        
     }
 
-    private static buildRemoveDuplicatesSQL(tableName: string): string {
-        // Remove duplicates based on the primary key (id).
-        // Keep the last occurrence by using row_number() ordered by rowid in descending order.
-        // DuckDB automatically assigns a rowid to each row, with later rows having higher rowids.
-        return `DELETE FROM ${tableName} WHERE rowid IN (
-            SELECT rowid FROM (
-                SELECT rowid, ROW_NUMBER() OVER (
-                    PARTITION BY ${this.ID_PROPERTY}
-                    ORDER BY rowid DESC
-                ) as rn
-                FROM ${tableName}
-            ) WHERE rn > 1
-        )`;
+    private static buildValidationSQL(tableName: string): string[] {
+        return [
+            `ALTER TABLE ${tableName} ADD COLUMN lms_import_warning VARCHAR DEFAULT NULL`,
+            `UPDATE ${tableName} SET lms_import_warning = 'Missing latitude/longitude: station will not appear on OpenStreetMap until coordinates are supplied'
+                WHERE ${this.LATITUDE_PROPERTY} IS NULL OR ${this.LONGITUDE_PROPERTY} IS NULL`,
+        ];
+    }
+
+    private static async validateLmsData(conn: DuckDBConnection, tableName: string): Promise<PreviewError | void> {
+        try {
+            const duplicateStationIds = await DuckDBUtils.getDuplicateCount(conn, tableName, this.ID_PROPERTY);
+            if (duplicateStationIds.length > 0) {
+                return {
+                    type: 'SQL_EXECUTION_ERROR',
+                    message: 'LMS Validation: duplicate station IDs found in the import file.',
+                    detail: `Duplicate station IDs: ${duplicateStationIds.map((row: any) => row[this.ID_PROPERTY]).join(', ')}`,
+                };
+            }
+
+            const invalidLatitudeCount = await this.getCount(conn, tableName, `${this.LATITUDE_PROPERTY} IS NOT NULL AND (${this.LATITUDE_PROPERTY} < -90 OR ${this.LATITUDE_PROPERTY} > 90)`);
+            if (invalidLatitudeCount > 0) {
+                return {
+                    type: 'SQL_EXECUTION_ERROR',
+                    message: 'LMS Validation: latitude must be between -90 and 90.',
+                    detail: `${invalidLatitudeCount} row(s) have invalid latitude values.`,
+                };
+            }
+
+            const invalidLongitudeCount = await this.getCount(conn, tableName, `${this.LONGITUDE_PROPERTY} IS NOT NULL AND (${this.LONGITUDE_PROPERTY} < -180 OR ${this.LONGITUDE_PROPERTY} > 180)`);
+            if (invalidLongitudeCount > 0) {
+                return {
+                    type: 'SQL_EXECUTION_ERROR',
+                    message: 'LMS Validation: longitude must be between -180 and 180.',
+                    detail: `${invalidLongitudeCount} row(s) have invalid longitude values.`,
+                };
+            }
+
+            await conn.run(this.buildValidationSQL(tableName).join('; '));
+        } catch (error) {
+            return ImportErrorUtils.classifyDuckDbError(error, 'LMS Validation');
+        }
+    }
+
+    private static async getCount(conn: DuckDBConnection, tableName: string, whereClause: string): Promise<number> {
+        const reader = await conn.runAndReadAll(`SELECT COUNT(*)::INTEGER AS cnt FROM ${tableName} WHERE ${whereClause}`);
+        const rows = reader.getRowObjects();
+        return Number(rows[0]?.cnt ?? 0);
     }
 
 }

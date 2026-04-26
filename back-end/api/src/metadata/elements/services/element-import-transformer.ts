@@ -45,7 +45,7 @@ export class ElementImportTransformer {
         userId?: number,
     ): Promise<PreviewError | void> {
 
-        const steps: { name: string; buildSql: () => string[] }[] = [
+        const transformSteps: { name: string; buildSql: () => string[] }[] = [
             { name: 'Id', buildSql: () => ElementImportTransformer.buildAlterIdColumnSQL(tableName, mapping) },
             { name: 'Abbreviation', buildSql: () => ElementImportTransformer.buildAlterAbbreviationColumnSQL(tableName, mapping) },
             { name: 'Name', buildSql: () => ElementImportTransformer.buildAlterNameColumnSQL(tableName, mapping) },
@@ -54,19 +54,9 @@ export class ElementImportTransformer {
             { name: 'Element Type', buildSql: () => ElementImportTransformer.buildAlterElementTypeColumnSQL(tableName, mapping) },
             { name: 'Entry Scale Factor', buildSql: () => ElementImportTransformer.buildAlterEntryScaleFactorColumnSQL(tableName, mapping) },
             { name: 'Comment', buildSql: () => ElementImportTransformer.buildAlterCommentColumnSQL(tableName, mapping) },
-            {
-                name: 'Finalize',
-                buildSql: () => {
-                    return [
-                        `ALTER TABLE ${tableName} ADD COLUMN ${ElementImportTransformer.ENTRY_USER_ID_PROPERTY} INTEGER DEFAULT ${userId || 'NULL'}`,
-                        ...ElementImportTransformer.buildRemoveDuplicatesSQL(tableName),
-                        `CREATE OR REPLACE TABLE ${tableName} AS SELECT ${ElementImportTransformer.ALL_COLUMNS.join(', ')} FROM ${tableName}`,
-                    ];
-                }
-            },
         ];
 
-        for (const step of steps) {
+        for (const step of transformSteps) {
             try {
                 const sqls = step.buildSql();
                 if (sqls.length > 0) {
@@ -75,6 +65,23 @@ export class ElementImportTransformer {
             } catch (error) {
                 return ImportErrorUtils.classifyDuckDbError(error, step.name);
             }
+        }
+
+        const validationError = await ElementImportTransformer.validateLmsData(conn, tableName);
+        if (validationError) return validationError;
+
+        const finalizeStep = {
+            name: 'Finalize',
+            buildSql: () => [
+                `ALTER TABLE ${tableName} ADD COLUMN ${ElementImportTransformer.ENTRY_USER_ID_PROPERTY} INTEGER DEFAULT ${userId || 'NULL'}`,
+                `CREATE OR REPLACE TABLE ${tableName} AS SELECT ${ElementImportTransformer.ALL_COLUMNS.join(', ')} FROM ${tableName}`,
+            ],
+        };
+
+        try {
+            await conn.run(finalizeStep.buildSql().join('; '));
+        } catch (error) {
+            return ImportErrorUtils.classifyDuckDbError(error, finalizeStep.name);
         }
     }
 
@@ -156,22 +163,42 @@ export class ElementImportTransformer {
         }
     }
 
-    private static buildRemoveDuplicatesSQL(tableName: string): string[] {
-        // Remove duplicates for each unique column (id, abbreviation, name).
-        // Keep the last occurrence by using row_number() ordered by rowid in descending order.
-        // DuckDB automatically assigns a rowid to each row, with later rows having higher rowids.
-        // Each pass is run separately because a single row may be unique on one column but duplicate on another.
-        return [this.ID_PROPERTY, this.ABBREVIATION_PROPERTY, this.NAME_PROPERTY].map(col =>
-            `DELETE FROM ${tableName} WHERE rowid IN (
-                SELECT rowid FROM (
-                    SELECT rowid, ROW_NUMBER() OVER (
-                        PARTITION BY ${col}
-                        ORDER BY rowid DESC
-                    ) as rn
-                    FROM ${tableName}
-                ) WHERE rn > 1
-            )`
-        );
+    private static async validateLmsData(conn: DuckDBConnection, tableName: string): Promise<PreviewError | void> {
+        try {
+            const duplicateChecks = [
+                { column: this.ID_PROPERTY, label: 'element IDs' },
+                { column: this.ABBREVIATION_PROPERTY, label: 'abbreviations' },
+                { column: this.NAME_PROPERTY, label: 'names' },
+            ];
+
+            for (const duplicateCheck of duplicateChecks) {
+                const duplicateRows = await DuckDBUtils.getDuplicateCount(conn, tableName, duplicateCheck.column);
+                if (duplicateRows.length > 0) {
+                    return {
+                        type: 'SQL_EXECUTION_ERROR',
+                        message: `LMS Validation: duplicate ${duplicateCheck.label} found in the import file.`,
+                        detail: `Duplicate ${duplicateCheck.label}: ${duplicateRows.map((row: any) => row[duplicateCheck.column]).join(', ')}`,
+                    };
+                }
+            }
+
+            const missingUnitsCount = await this.getCount(conn, tableName, `${this.UNITS_PROPERTY} IS NULL OR trim(${this.UNITS_PROPERTY}) = ''`);
+            if (missingUnitsCount > 0) {
+                return {
+                    type: 'SQL_EXECUTION_ERROR',
+                    message: 'LMS Validation: units are required for every element.',
+                    detail: `${missingUnitsCount} row(s) have missing or empty units.`,
+                };
+            }
+        } catch (error) {
+            return ImportErrorUtils.classifyDuckDbError(error, 'LMS Validation');
+        }
+    }
+
+    private static async getCount(conn: DuckDBConnection, tableName: string, whereClause: string): Promise<number> {
+        const reader = await conn.runAndReadAll(`SELECT COUNT(*)::INTEGER AS cnt FROM ${tableName} WHERE ${whereClause}`);
+        const rows = reader.getRowObjects();
+        return Number(rows[0]?.cnt ?? 0);
     }
 
 }

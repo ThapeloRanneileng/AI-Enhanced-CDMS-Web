@@ -9,6 +9,7 @@ import { AuthUtil } from 'src/user/services/auth.util';
 import { Request } from 'express';
 import { StationsImportExportService } from '../services/stations-import-export.service';
 import { FileIOService } from 'src/shared/services/file-io.service';
+import { ImportStationMetadataDto, StationMetadataImportResultDto } from '../dtos/import-station-metadata.dto';
 
 @Controller('stations')
 export class StationsController {
@@ -55,6 +56,14 @@ export class StationsController {
     @Req() request: Request,
     @Body() items: CreateStationDto[]): Promise<void> {
     await this.stationsService.bulkPut(items, AuthUtil.getLoggedInUserId(request));
+  }
+
+  @Admin()
+  @Post('manual-import')
+  async manualImportStationMetadata(
+    @Req() request: Request,
+    @Body() importDto: ImportStationMetadataDto): Promise<StationMetadataImportResultDto> {
+    return this.stationsService.importStationMetadataRows(importDto.rows || [], AuthUtil.getLoggedInUserId(request));
   }
 
   @Admin()

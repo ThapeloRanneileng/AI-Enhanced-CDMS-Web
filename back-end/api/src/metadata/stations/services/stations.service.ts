@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { StationEntity } from '../entities/station.entity';
 import { UpdateStationDto } from '../dtos/update-station.dto';
 import { CreateStationDto } from '../dtos/create-station.dto';
@@ -8,6 +8,10 @@ import { ViewStationQueryDTO } from '../dtos/view-station-query.dto';
 import { MetadataUpdatesQueryDto } from 'src/metadata/metadata-updates/dtos/metadata-updates-query.dto';
 import { MetadataUpdatesDto } from 'src/metadata/metadata-updates/dtos/metadata-updates.dto';
 import { CacheLoadResult, MetadataCache } from 'src/shared/cache/metadata-cache';
+import {
+    StationMetadataImportResultDto,
+    StationMetadataImportRowDto,
+} from '../dtos/import-station-metadata.dto';
 
 @Injectable()
 export class StationsService implements OnModuleInit {
@@ -15,6 +19,7 @@ export class StationsService implements OnModuleInit {
 
     constructor(
         @InjectRepository(StationEntity) private readonly stationRepo: Repository<StationEntity>,
+        private readonly dataSource: DataSource,
     ) {
         this.cache = new MetadataCache<CreateStationDto>(
             'Stations',
@@ -135,9 +140,55 @@ export class StationsService implements OnModuleInit {
     }
 
     public async delete(id: string): Promise<string> {
-        await this.stationRepo.remove(await this.getEntity(id));
-        await this.invalidateCache();
-        return id;
+        await this.assertStationIsNotInUse(id);
+
+        try {
+            await this.stationRepo.remove(await this.getEntity(id));
+            await this.invalidateCache();
+            return id;
+        } catch (error: any) {
+            if (error?.code === '23503') {
+                throw new BadRequestException(this.getStationInUseMessage(id));
+            }
+            throw error;
+        }
+    }
+
+    private async assertStationIsNotInUse(id: string): Promise<void> {
+        const checks: { label: string; table: string; where: string; params: unknown[] }[] = [
+            { label: 'observations', table: 'observations', where: 'station_id = $1', params: [id] },
+            { label: 'station-source allocations', table: 'station_forms', where: 'station_id = $1', params: [id] },
+            { label: 'network affiliations', table: 'station_network_affiliations', where: 'station_id = $1', params: [id] },
+            { label: 'paper archive records', table: 'paper_archives', where: 'station_id = $1', params: [id] },
+            { label: 'anomaly assessments', table: 'observation_anomaly_assessments', where: 'station_id = $1', params: [id] },
+            { label: 'AI training outputs', table: 'observation_anomaly_models', where: 'station_id = $1', params: [id] },
+            { label: 'AWS real-time/source specifications', table: 'source_templates', where: `(parameters->'stationIds') ? $1 OR (parameters #> '{dataStructureParameters,stationDefinition,stationsToFetch}') @> $2::jsonb`, params: [id, JSON.stringify([{ databaseId: id }])] },
+            { label: 'QC specifications', table: 'qc_tests', where: `(parameters->'stationIds') ? $1`, params: [id] },
+        ];
+
+        const dependencies: string[] = [];
+        for (const check of checks) {
+            const count = await this.getDependencyCount(check.table, check.where, check.params);
+            if (count > 0) {
+                dependencies.push(check.label);
+            }
+        }
+
+        if (dependencies.length > 0) {
+            throw new BadRequestException(`${this.getStationInUseMessage(id)} Related records found in: ${dependencies.join(', ')}.`);
+        }
+    }
+
+    private async getDependencyCount(table: string, where: string, params: unknown[]): Promise<number> {
+        const result: { count: string }[] = await this.dataSource.query(
+            `SELECT COUNT(*)::int AS count FROM ${table} WHERE ${where}`,
+            params,
+        );
+        return Number(result[0]?.count || 0);
+    }
+
+    private getStationInUseMessage(id: string): string {
+        return `Station #${id} is already in use by observations, source specifications, station allocations, AWS configuration, QC rules, anomaly records, paper archive records, or other records and cannot be deleted.`;
     }
 
     private async getEntity(id: string): Promise<StationEntity> {
@@ -215,6 +266,112 @@ export class StationsService implements OnModuleInit {
         }
 
         await this.invalidateCache();
+    }
+
+    public async importStationMetadataRows(rows: StationMetadataImportRowDto[], userId: number): Promise<StationMetadataImportResultDto> {
+        const rejectedRows: StationMetadataImportResultDto['rejectedRows'] = [];
+        const existingStationIds = new Set(this.cache.getAll().map(station => station.id));
+        const acceptedRows: { rowNumber: number; sourceRow: StationMetadataImportRowDto; station: CreateStationDto }[] = [];
+
+        rows.forEach((row, index) => {
+            const rowNumber = index + 2;
+            const stationId = this.toOptionalString(row.id);
+            const stationName = this.toOptionalString(row.name);
+            const reasons: string[] = [];
+
+            if (!stationId) reasons.push('Station ID is required');
+            if (!stationName) reasons.push('Station name is required');
+            if (stationId && existingStationIds.has(stationId)) reasons.push(`Station ID '${stationId}' already exists`);
+
+            const latitude = this.parseOptionalNumber(row.latitude, 'Latitude', reasons);
+            const longitude = this.parseOptionalNumber(row.longitude, 'Longitude', reasons);
+            const elevation = this.parseOptionalNumber(row.elevation, 'Elevation', reasons);
+
+            if (reasons.length > 0 || !stationId || !stationName) {
+                rejectedRows.push({
+                    rowNumber,
+                    stationId,
+                    reasons,
+                    row,
+                });
+                return;
+            }
+
+            acceptedRows.push({
+                rowNumber,
+                sourceRow: row,
+                station: {
+                    id: stationId,
+                    name: stationName,
+                    description: this.toOptionalString(row.description),
+                    latitude,
+                    longitude,
+                    elevation,
+                    wmoId: this.toOptionalString(row.wmoId),
+                    wigosId: this.toOptionalString(row.wigosId),
+                    icaoId: this.toOptionalString(row.icaoId),
+                    comment: this.toOptionalString(row.comment),
+                },
+            });
+            existingStationIds.add(stationId);
+        });
+
+        let importedRows = 0;
+        for (const acceptedRow of acceptedRows) {
+            const entity = this.stationRepo.create({ id: acceptedRow.station.id });
+            this.updateEntity(entity, acceptedRow.station, userId);
+
+            try {
+                await this.stationRepo.save(entity);
+                importedRows++;
+            } catch (error) {
+                rejectedRows.push({
+                    rowNumber: acceptedRow.rowNumber,
+                    stationId: acceptedRow.station.id,
+                    reasons: [this.formatImportSaveError(error)],
+                    row: acceptedRow.sourceRow,
+                });
+            }
+        }
+
+        if (importedRows > 0) {
+            await this.invalidateCache();
+        }
+
+        return {
+            totalRows: rows.length,
+            importedRows,
+            rejectedRows,
+        };
+    }
+
+    private toOptionalString(value: unknown): string | undefined {
+        if (value === undefined || value === null) return undefined;
+        const text = String(value).trim();
+        return text === '' ? undefined : text;
+    }
+
+    private parseOptionalNumber(value: unknown, fieldName: string, reasons: string[]): number | undefined {
+        const text = this.toOptionalString(value);
+        if (!text) return undefined;
+
+        const numberValue = Number(text);
+        if (!Number.isFinite(numberValue)) {
+            reasons.push(`${fieldName} must be numeric`);
+            return undefined;
+        }
+
+        return numberValue;
+    }
+
+    private formatImportSaveError(error: unknown): string {
+        if (error && typeof error === 'object' && 'detail' in error && typeof error.detail === 'string') {
+            return error.detail;
+        }
+        if (error instanceof Error && error.message) {
+            return error.message;
+        }
+        return 'Could not save station row';
     }
 
     private async insertOrUpdateValues(entities: StationEntity[]): Promise<void> {
