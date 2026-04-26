@@ -1,10 +1,12 @@
-# Pwa
+# AI-Enhanced CDMS
+
+Angular PWA frontend for the AI-Enhanced CDMS platform. This app provides the browser-based workflows for observation entry, ingestion, data extraction, quality control, administration, and AI-assisted review.
 
 This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 16.0.2.
 
 ## Development server
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+Run `npm run start` from this directory, or `npm --prefix front-end/pwa run start` from the repository root. Navigate to `http://localhost:4200/`. The application reloads when source files change.
 
 ## Code scaffolding
 
@@ -12,7 +14,7 @@ Run `ng generate component component-name` to generate a new component. You can 
 
 ## Build
 
-Run `ng build` to build the project. The build artifacts will be stored in the `dist/` directory.
+Run `npm run build` from this directory, or `npm --prefix front-end/pwa run build` from the repository root. The build artifacts are written to the `dist/` directory.
 
 ## Running unit tests
 

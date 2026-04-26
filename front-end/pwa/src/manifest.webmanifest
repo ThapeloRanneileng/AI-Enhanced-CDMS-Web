@@ -1,8 +1,8 @@
 {
-  "name": "Climsoft Web",
-  "short_name": "ClimsoftWeb",
-  "theme_color": "#1976d2",
-  "background_color": "#fafafa",
+  "name": "AI-Enhanced CDMS",
+  "short_name": "CDMS AI",
+  "theme_color": "#1268d6",
+  "background_color": "#edf3fa",
   "display": "standalone",
   "scope": "./",
   "start_url": "./",
