@@ -46,6 +46,7 @@ export enum SubMenuNameEnum {
     STATIONS = 'Stations',
     QC_SPECIFICATIONS = 'QC Specifications',
     SOURCE_SPECIFICATIONS = 'Source Specifications',
+    PAPER_ARCHIVE = 'Paper Archive',
     EXPORT_SPECIFICATIONS = 'Export Specifications',
     CONNECTOR_SPECIFICATIONS = 'Connector Specifications',
 
@@ -193,6 +194,10 @@ export class MenuItemsUtil {
                 {
                     name: SubMenuNameEnum.SOURCE_SPECIFICATIONS,
                     url: '/view-source-specifications',
+                },
+                {
+                    name: SubMenuNameEnum.PAPER_ARCHIVE,
+                    url: '/paper-archive',
                 },
                 {
                     name: SubMenuNameEnum.EXPORT_SPECIFICATIONS,

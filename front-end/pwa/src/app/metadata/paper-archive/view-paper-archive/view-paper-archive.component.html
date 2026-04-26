@@ -1,0 +1,89 @@
+<div class="cdms-page">
+  <div class="cdms-page-header">
+    <div>
+      <h1>Paper Archive</h1>
+      <p>Scanned observation sheets linked to station, source form, date, and hour.</p>
+    </div>
+  </div>
+
+  <section class="archive-upload">
+    <div class="row g-3 align-items-end">
+      <div class="col-12 col-lg-3">
+        <label class="form-label">Scanned file</label>
+        <input type="file" class="form-control" accept=".pdf,image/*" (change)="onFileSelected($event)">
+        <div class="small text-muted mt-1" *ngIf="fileName">{{ fileName }}</div>
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="form-label">Station ID</label>
+        <input type="text" class="form-control" [(ngModel)]="stationId" placeholder="LESBUT1">
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="form-label">Source/Form ID</label>
+        <input type="number" class="form-control" [(ngModel)]="sourceId">
+      </div>
+      <div class="col-6 col-lg-2">
+        <label class="form-label">Observation Date</label>
+        <input type="date" class="form-control" [(ngModel)]="observationDate">
+      </div>
+      <div class="col-6 col-lg-1">
+        <label class="form-label">Hour</label>
+        <input type="number" min="0" max="23" class="form-control" [(ngModel)]="observationHour">
+      </div>
+      <div class="col-12 col-lg-2">
+        <button type="button" class="btn btn-primary w-100" [disabled]="!selectedFile || uploading" (click)="upload()">
+          <span class="bi bi-upload me-1"></span>
+          {{ uploading ? 'Uploading...' : 'Upload' }}
+        </button>
+      </div>
+      <div class="col-12">
+        <label class="form-label">Notes</label>
+        <input type="text" class="form-control" [(ngModel)]="notes">
+      </div>
+    </div>
+  </section>
+
+  <section class="archive-list">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Station</th>
+            <th>Source</th>
+            <th>Date</th>
+            <th>Hour</th>
+            <th>Status</th>
+            <th>Uploaded</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngIf="!loading && archives.length === 0">
+            <td colspan="8" class="text-muted py-4">No archived paper forms yet.</td>
+          </tr>
+          <tr *ngFor="let archive of archives">
+            <td>
+              <div class="fw-semibold">{{ archive.originalFileName }}</div>
+              <div class="small text-muted text-truncate checksum">{{ archive.checksum }}</div>
+            </td>
+            <td>{{ archive.stationId || '-' }}</td>
+            <td>{{ archive.sourceId || '-' }}</td>
+            <td>{{ archive.observationDate || '-' }}</td>
+            <td>{{ archive.observationHour === null ? '-' : archive.observationHour }}</td>
+            <td>
+              <span class="badge" [class.text-bg-warning]="archive.status === 'needs_review'" [class.text-bg-success]="archive.status === 'active'">
+                {{ archive.status }}
+              </span>
+            </td>
+            <td>{{ archive.uploadedAt | date:'yyyy-MM-dd HH:mm' }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-primary" [href]="fileUrl(archive.id)" target="_blank" rel="noopener">
+                <span class="bi bi-box-arrow-up-right"></span>
+              </a>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

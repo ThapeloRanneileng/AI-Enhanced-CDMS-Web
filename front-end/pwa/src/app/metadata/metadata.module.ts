@@ -90,6 +90,7 @@ import { ImportFileServerParamsComponent } from './connector-specifications/conn
 import { ConnectorSpecificationSelectorSingleComponent } from './connector-specifications/connector-specification-selector-single/connector-specification-selector-single.component';
 import { BulkEditElementsDialogComponent } from './elements/bulk-edit-elements-dialog/bulk-edit-elements-dialog.component';
 import { BulkEditStationsDialogComponent } from './stations/bulk-edit-stations-dialog/bulk-edit-stations-dialog.component';
+import { ViewPaperArchiveComponent } from './paper-archive/view-paper-archive/view-paper-archive.component';
 
 @NgModule({
   declarations: [ 
@@ -208,6 +209,7 @@ import { BulkEditStationsDialogComponent } from './stations/bulk-edit-stations-d
     NetworkAffiliationsSelectorSingleComponent,
 
     ConnectorSpecificationSelectorSingleComponent,
+    ViewPaperArchiveComponent,
 
   ],
   imports: [

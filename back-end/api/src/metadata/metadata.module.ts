@@ -53,6 +53,9 @@ import { QCSpecificationEntity } from './qc-specifications/entities/qc-specifica
 import { QCSpecificationsController } from './qc-specifications/controllers/qc-specifications.controller';
 import { MetadataImportPreviewController } from './controllers/metadata-import-preview.controller';
 import { MetadataImportPreviewService } from './services/metadata-import-preview.service';
+import { PaperArchiveEntity } from './paper-archive/entities/paper-archive.entity';
+import { PaperArchiveController } from './paper-archive/controllers/paper-archive.controller';
+import { PaperArchiveService } from './paper-archive/services/paper-archive.service';
 
 @Module({
     imports: [
@@ -79,6 +82,7 @@ import { MetadataImportPreviewService } from './services/metadata-import-preview
             ExportSpecificationEntity,
 
             ConnectorSpecificationEntity,
+            PaperArchiveEntity,
         ]),
         SharedModule,
         UserModule,
@@ -109,6 +113,7 @@ import { MetadataImportPreviewService } from './services/metadata-import-preview
         MetadataUpdatesController,
 
         MetadataImportPreviewController,
+        PaperArchiveController,
     ],
     providers: [
         ElementSubdomainsService,
@@ -135,6 +140,7 @@ import { MetadataImportPreviewService } from './services/metadata-import-preview
         ExportSpecificationsService,
 
         ConnectorSpecificationsService,
+        PaperArchiveService,
     ],
 
     exports: [

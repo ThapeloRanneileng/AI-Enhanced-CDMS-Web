@@ -9,6 +9,7 @@ import { ViewConnectorSpecificationsComponent } from './connector-specifications
 import { ViewOrganisationsComponent } from './organisations/view-organisations/view-organisations.component';
 import { ViewNetworkAffiliationsComponent } from './network-affiliations/view-network-affiliations/view-network-affiliations.component';
 import { ViewQCSpecificationsComponent } from './qc-tests/view-qc-specifications/view-qc-specifications.component';
+import { ViewPaperArchiveComponent } from './paper-archive/view-paper-archive/view-paper-archive.component';
 
 const routes: Routes = [
   {
@@ -57,6 +58,10 @@ const routes: Routes = [
       {
         path: 'view-connector-specifications',
         component: ViewConnectorSpecificationsComponent
+      },
+      {
+        path: 'paper-archive',
+        component: ViewPaperArchiveComponent
       },
     ]
   }
