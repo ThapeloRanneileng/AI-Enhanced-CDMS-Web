@@ -1,0 +1,197 @@
+<section class="ai-management">
+  <div class="hero-panel">
+    <div>
+      <span class="eyebrow">Observation AI</span>
+      <h2>AI Anomaly Management</h2>
+      <p>Prepare datasets, train baseline anomaly models, and inspect persisted model metadata for the shared observation pipeline.</p>
+    </div>
+    <button type="button" class="btn btn-light btn-sm" (click)="refreshLists()" [disabled]="loading">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <span class="summary-label">Total training runs</span>
+      <strong>{{ trainingRuns.length }}</strong>
+      <small>Persisted observation-ai runs</small>
+    </div>
+    <div class="summary-card">
+      <span class="summary-label">Total trained models</span>
+      <strong>{{ models.length }}</strong>
+      <small>Available model metadata records</small>
+    </div>
+    <div class="summary-card latest-run">
+      <span class="summary-label">Latest training run</span>
+      <strong>{{ latestTrainingRunLabel }}</strong>
+      <small>{{ latestTrainingRunDate }}</small>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Training Selection</div>
+    <div class="filter-grid">
+      <div class="filter-field selector-field">
+        <app-station-selector-multiple
+          [id]="'ai_anomaly_training_stations'"
+          [label]="'Stations'"
+          [placeholder]="'All stations'"
+          [(selectedIds)]="selectedStationIds" />
+      </div>
+      <div class="filter-field element-field">
+        <span class="field-label">Elements</span>
+        <div class="element-options" role="group" aria-label="Training elements">
+          <button
+            type="button"
+            class="element-option"
+            *ngFor="let element of elementOptions"
+            [class.selected]="isElementSelected(element.code)"
+            (click)="toggleElement(element.code)">
+            <span class="check-indicator">
+              <i class="bi" [class.bi-check-lg]="isElementSelected(element.code)"></i>
+            </span>
+            <span>
+              <strong>{{ element.code }}</strong>
+              <small>{{ element.name }}</small>
+            </span>
+          </button>
+        </div>
+      </div>
+      <div class="filter-field selector-field">
+        <app-interval-selector-multiple
+          [id]="'ai_anomaly_training_intervals'"
+          [label]="'Intervals'"
+          [placeholder]="'Select intervals'"
+          [(selectedIds)]="selectedIntervals" />
+      </div>
+      <label class="filter-field">Level<input type="number" [(ngModel)]="level"></label>
+      <label class="filter-field">From<input type="date" [(ngModel)]="fromDate"></label>
+      <label class="filter-field">To<input type="date" [(ngModel)]="toDate"></label>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn btn-outline-primary" (click)="previewDataset()" [disabled]="loading">Preview Dataset</button>
+      <button type="button" class="btn btn-primary" (click)="runTraining()" [disabled]="loading">Run Training</button>
+    </div>
+  </div>
+
+  <div class="grid-two">
+    <div class="panel">
+      <div class="panel-title">Proxy Training Sources</div>
+      <div class="source-card" *ngFor="let source of proxySources">
+        <div>
+          <strong>{{ source.name }}</strong>
+          <span>{{ source.cadence }}</span>
+        </div>
+        <p>{{ source.role }}</p>
+        <small>{{ source.supportedElementCodes.join(', ') }}</small>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Dataset Preview</div>
+      <div class="table-wrap">
+        <table class="table table-sm table-hover">
+          <thead>
+            <tr><th>Station</th><th>Element</th><th>Datetime</th><th>Value</th><th>Interval</th><th>Source</th></tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of previewRows">
+              <td>{{ row.stationId }}</td>
+              <td>{{ row.elementCode }}</td>
+              <td>{{ row.observationDatetime }}</td>
+              <td>{{ row.value }}</td>
+              <td>{{ row.interval }}</td>
+              <td>{{ row.sourceName || row.sourceId }}</td>
+            </tr>
+            <tr *ngIf="previewRows.length === 0"><td colspan="6" class="empty">No preview loaded.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Persisted Training Runs</div>
+    <div class="table-wrap">
+      <table class="table table-sm table-hover">
+        <thead>
+          <tr><th>ID</th><th>Status</th><th>Dataset</th><th>Rows</th><th>Range From</th><th>Range To</th><th>Feature Schema</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let run of trainingRuns">
+            <td>{{ run.id }}</td><td>{{ run.status }}</td><td>{{ run.trainingDatasetKind }}</td><td>{{ run.trainingRows }}</td>
+            <td>{{ run.trainingRangeFrom }}</td><td>{{ run.trainingRangeTo }}</td><td>{{ run.featureSchemaVersion }}</td><td>{{ run.createdAt }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid-two model-grid">
+    <div class="panel">
+      <div class="panel-title">Persisted Trained Models</div>
+      <div class="table-wrap">
+        <table class="table table-sm table-hover">
+          <thead>
+            <tr>
+              <th>model_id</th><th>model_name</th><th>model_version</th><th>station_id</th><th>element_id</th><th>interval</th><th>level</th>
+              <th>training_range_from</th><th>training_range_to</th><th>training_rows</th><th>training_dataset_kind</th><th>feature_schema_version</th><th>created_at</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              *ngFor="let model of models"
+              class="clickable-row"
+              [class.active-row]="isSelectedModel(model)"
+              (click)="selectModel(model)">
+              <td>{{ model.modelId }}</td><td>{{ model.modelName }}</td><td>{{ model.modelVersion }}</td><td>{{ model.stationId }}</td>
+              <td>{{ model.elementId }}</td><td>{{ model.interval }}</td><td>{{ model.level }}</td><td>{{ model.trainingRangeFrom }}</td>
+              <td>{{ model.trainingRangeTo }}</td><td>{{ model.trainingRows }}</td><td>{{ model.trainingDatasetKind }}</td><td>{{ model.featureSchemaVersion }}</td><td>{{ model.createdAt }}</td>
+            </tr>
+            <tr *ngIf="models.length === 0">
+              <td colspan="13" class="empty">No persisted models found.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <div class="panel-title">Selected Model Detail</div>
+        <div class="source-card" *ngIf="!selectedModel">Select a model row to inspect persisted metadata.</div>
+        <div class="detail-grid" *ngIf="selectedModel">
+          <div class="source-card mini-card"><span class="field-label">model_id</span><strong>{{ selectedModel.modelId }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">model_name</span><strong>{{ selectedModel.modelName }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">model_version</span><strong>{{ selectedModel.modelVersion }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">station_id</span><strong>{{ selectedModel.stationId }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">element_id</span><strong>{{ selectedModel.elementId }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">interval</span><strong>{{ selectedModel.interval }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">level</span><strong>{{ selectedModel.level }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">training_range_from</span><strong>{{ selectedModel.trainingRangeFrom }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">training_range_to</span><strong>{{ selectedModel.trainingRangeTo }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">training_rows</span><strong>{{ selectedModel.trainingRows }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">training_dataset_kind</span><strong>{{ selectedModel.trainingDatasetKind }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">feature_schema_version</span><strong>{{ selectedModel.featureSchemaVersion }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">created_at</span><strong>{{ selectedModel.createdAt }}</strong></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">Latest Anomaly Result</div>
+        <div class="source-card" *ngIf="latestScoringState !== 'ready'">
+          {{ latestScoringMessage }}
+        </div>
+        <div class="detail-grid" *ngIf="latestScoringState === 'ready' && latestScoring">
+          <div class="source-card mini-card"><span class="field-label">observed_at</span><strong>{{ latestScoringObservedAt }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">outcome</span><strong>{{ latestScoringOutcome }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">anomaly_score</span><strong>{{ latestScoringScore ?? 'Not available' }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">confidence_score</span><strong>{{ latestScoringConfidence ?? 'Not available' }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">severity</span><strong>{{ latestScoringSeverity }}</strong></div>
+          <div class="source-card mini-card"><span class="field-label">assessment_created_at</span><strong>{{ latestScoringCreatedAt }}</strong></div>
+          <div class="source-card mini-card detail-item-wide"><span class="field-label">summary</span><strong>{{ latestScoringSummary }}</strong></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>

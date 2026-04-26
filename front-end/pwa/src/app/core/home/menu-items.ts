@@ -34,6 +34,7 @@ export enum SubMenuNameEnum {
 
     SOURCE_CHECKS = 'Source Checks',
     QC_ASSESSMENT = 'QC Review Workspace',
+    AI_ANOMALY_MANAGEMENT = 'AI Anomaly Management',
     //SCHEDULED_QC_TESTS = 'Scheduled QC Tests',
 
     MANUAL_EXPORT = 'Manual Export',
@@ -132,6 +133,10 @@ export class MenuItemsUtil {
                 {
                     name: SubMenuNameEnum.QC_ASSESSMENT,
                     url: '/review-workspace',
+                },
+                {
+                    name: SubMenuNameEnum.AI_ANOMALY_MANAGEMENT,
+                    url: '/ai-anomaly-management',
                 },
                 // {
                 //     name: SubMenuNameEnum.SCHEDULED_QC_TESTS,
