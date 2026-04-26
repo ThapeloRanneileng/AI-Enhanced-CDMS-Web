@@ -1,40 +1,58 @@
-<div class="card border-0">
-
-    <app-query-selection [parentComponentName]="componentName" [enableQueryButton]="enableQueryButton"
-        [inputFilter]="queryFilter" (queryClick)="onQueryClick($event)" />
-
-    <div class="card border-0 p-0 mt-2">
-        <div class="card-header d-flex justify-content-between px-0 py-1 align-items-center">
-            <div class="fw-bold ms-1">Entries</div>
-            <div *ngIf="pageInputDefinition.totalRowCount" class="d-flex">
-                <app-drop-down-button [buttonText]="'More Options'" [dropDownItems]="['Stack/Unstack','Delete All']"
-                    (dropDownOptionClick)="onOptionsSelected($event)" [offSetRight]="false" />
-                <div class="vr mx-2"></div>
-                <app-page-input [pageInputDefinition]="pageInputDefinition" (pageInputDefinitionChange)="loadData()" />
-                <div *ngIf="changedCount" class="d-flex align-items-center">
-                    <div class="vr mx-2"></div>
-                    <div class="text-success me-2">{{changedCount}} record(s) changed</div>
-                </div>
-            </div>
+<section class="cdms-page-shell">
+    <div class="cdms-page-header">
+        <div>
+            <span class="eyebrow">Data ingestion</span>
+            <h2>Data Correction</h2>
+            <p>Review queried observations, edit values and flags, then submit the corrected records.</p>
         </div>
-
-        <div class="card-body p-0 ">
-            <div *ngIf="useUnstackedViewer">
-                <app-unstacked-data-viewer [observationsEntries]="observationsEntries"
-                    (valueChange)="onUserInput()" />
-            </div>
-            <div *ngIf="!useUnstackedViewer">
-                <app-stacked-data-viewer [pageInputDefinition]="pageInputDefinition"
-                    [observationsEntries]="observationsEntries" (valueChange)="onUserInput()"  />
-            </div>
-        </div>
-
-        <div class="card-footer bg-transparent d-flex justify-content-end px-0">
-            <button type="button" class="btn btn-sm btn-outline-primary me-2" [disabled]="!enableSaveButton"
-                (click)="onSave()">
-                Submit
-            </button>
+        <div class="cdms-header-meta">
+            <span class="cdms-header-chip">{{ pageInputDefinition.totalRowCount || 0 }} entries</span>
+            <span class="cdms-header-chip" *ngIf="changedCount">{{ changedCount }} changed</span>
         </div>
     </div>
 
-</div>
+    <div class="card border-0">
+
+        <app-query-selection [parentComponentName]="componentName" [enableQueryButton]="enableQueryButton"
+            [inputFilter]="queryFilter" (queryClick)="onQueryClick($event)" />
+
+        <div class="card border-0 p-0 mt-2">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <div>
+                    <div class="cdms-panel-title">Observation entries</div>
+                    <div class="cdms-panel-subtitle">Switch views, edit records, and submit pending corrections.</div>
+                </div>
+                <div *ngIf="pageInputDefinition.totalRowCount" class="d-flex align-items-center flex-wrap justify-content-end">
+                    <app-drop-down-button [buttonText]="'More Options'" [dropDownItems]="['Stack/Unstack','Delete All']"
+                        (dropDownOptionClick)="onOptionsSelected($event)" [offSetRight]="false" />
+                    <div class="vr mx-2"></div>
+                    <app-page-input [pageInputDefinition]="pageInputDefinition"
+                        (pageInputDefinitionChange)="loadData()" />
+                    <div *ngIf="changedCount" class="d-flex align-items-center">
+                        <div class="vr mx-2"></div>
+                        <div class="cdms-badge-success">{{ changedCount }} changed</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-body p-0">
+                <div *ngIf="useUnstackedViewer">
+                    <app-unstacked-data-viewer [observationsEntries]="observationsEntries"
+                        (valueChange)="onUserInput()" />
+                </div>
+                <div *ngIf="!useUnstackedViewer">
+                    <app-stacked-data-viewer [pageInputDefinition]="pageInputDefinition"
+                        [observationsEntries]="observationsEntries" (valueChange)="onUserInput()" />
+                </div>
+            </div>
+
+            <div class="card-footer bg-transparent d-flex justify-content-end">
+                <button type="button" class="btn btn-sm btn-outline-primary" [disabled]="!enableSaveButton"
+                    (click)="onSave()">
+                    Submit
+                </button>
+            </div>
+        </div>
+
+    </div>
+</section>
