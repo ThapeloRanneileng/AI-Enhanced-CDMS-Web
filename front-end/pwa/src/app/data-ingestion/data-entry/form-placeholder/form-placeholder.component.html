@@ -1,0 +1,55 @@
+<section class="placeholder-screen">
+  <div class="placeholder-shell">
+    <div class="placeholder-header">
+      <div>
+        <div class="eyebrow">Data Entry</div>
+        <h1>{{ title }}</h1>
+        <p>This form screen is ready for configuration. Station, element, and period selection belong here after the user has opened the form.</p>
+      </div>
+      <span class="status-pill">Placeholder</span>
+    </div>
+
+    <div class="selector-panel">
+      <div class="panel-title">Selectors</div>
+      <div class="row g-3">
+        <div class="col-sm-6 col-lg-3">
+          <label class="form-label">Station</label>
+          <select class="form-select" disabled>
+            <option>Choose station</option>
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3">
+          <label class="form-label">Element</label>
+          <select class="form-select" disabled>
+            <option>Choose element</option>
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-3" *ngIf="formKind !== 'monthly'">
+          <label class="form-label">Date</label>
+          <input class="form-control" type="date" disabled>
+        </div>
+        <div class="col-sm-6 col-lg-3" *ngIf="formKind === 'monthly'">
+          <label class="form-label">Month</label>
+          <input class="form-control" type="month" disabled>
+        </div>
+        <div class="col-sm-6 col-lg-3" *ngIf="formKind === 'hourly'">
+          <label class="form-label">Hour</label>
+          <select class="form-select" disabled>
+            <option>Choose hour</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="entry-panel">
+      <div class="panel-title">Fields</div>
+      <div class="empty-grid">
+        <div class="empty-cell" *ngFor="let item of [1, 2, 3, 4, 5, 6]"></div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="btn btn-sm btn-outline-secondary" (click)="onBack()">Back</button>
+    </div>
+  </div>
+</section>

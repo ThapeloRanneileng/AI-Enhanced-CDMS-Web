@@ -1,4 +1,18 @@
-<div class="card border-0" *ngIf="formDefinitions">
+<section class="cdms-page-shell" *ngIf="formDefinitions">
+  <div class="cdms-page-header">
+    <div>
+      <span class="eyebrow">AI-Enhanced CDMS</span>
+      <h2>Data Entry</h2>
+      <p>Capture manual climate observations with the same shared workflow, validation, and AI-assisted review context used across the platform.</p>
+    </div>
+    <div class="cdms-header-meta">
+      <span class="cdms-header-chip">{{ source.name }}</span>
+      <span class="cdms-header-chip">{{ formDefinitions.formMetadata.layout }}</span>
+      <span class="cdms-header-chip" *ngIf="station">{{ station.id }} - {{ station.name }}</span>
+    </div>
+  </div>
+
+<div class="card border-0">
   <div class="card-body p-0">
 
     <div *ngIf="userLocationErrorMessage" class="alert alert-danger d-flex justify-content-between">
@@ -12,11 +26,11 @@
     <div class="d-flex justify-content-between">
       <div class="card-title fw-bold my-1  d-flex align-items-center" style="font-size: 0.875rem;">
         <div class="me-1">{{source.name + ' data entry for'}}</div>
-        <div *ngIf="!formDefinitions.formMetadata.allowStationSelection">
+        <div *ngIf="!shouldDisplayStationSelector()">
           {{station.id + ' - ' + station.name }}
         </div>
         <div
-          *ngIf="formDefinitions.formMetadata.allowStationSelection && stationsIdsAssignedToForm && stationsIdsAssignedToForm.length>0">
+          *ngIf="shouldDisplayStationSelector() && stationsIdsAssignedToForm && stationsIdsAssignedToForm.length>0">
           <app-station-selector-single [id]="'form_stations_selector'" [selectedId]="station.id"
             [includeOnlyIds]="stationsIdsAssignedToForm" (selectedIdChange)="onStationChange($event)" />
         </div>
@@ -163,3 +177,4 @@
   </div>
 
 </div>
+</section>

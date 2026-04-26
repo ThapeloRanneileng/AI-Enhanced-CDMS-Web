@@ -83,6 +83,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected source!: ViewSourceModel;
 
   protected stationsIdsAssignedToForm!: string[];
+  protected openedFromFormCatalog: boolean = false;
 
   /** Definitions used to determine form functionalities */
   protected formDefinitions!: FormEntryDefinition;
@@ -178,6 +179,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     const stationId = this.route.snapshot.params['stationid'];
     const sourceId = +this.route.snapshot.params['sourceid'];
+    this.openedFromFormCatalog = this.route.snapshot.queryParams['from'] === 'forms';
 
     this.cachedMetadataService.allMetadataLoaded.pipe(
       takeUntil(this.destroy$),
@@ -209,7 +211,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       //-----------------------------------------------------
 
 
-      if (this.formDefinitions.formMetadata.allowStationSelection) {
+      if (this.shouldDisplayStationSelector()) {
         // Get the station ids assigned to use the form
         this.stationFormsService.getStationsAssignedToUseForm(sourceId).pipe(
           takeUntil(this.destroy$),
@@ -307,7 +309,12 @@ export class FormEntryComponent implements OnInit, OnDestroy {
 
   protected onStationChange(stationId: string) {
     this.formDefinitions.station = this.cachedMetadataService.getStation(stationId);
+    this.station = this.formDefinitions.station;
     this.loadObservations();
+  }
+
+  protected shouldDisplayStationSelector(): boolean {
+    return this.openedFromFormCatalog || !!this.formDefinitions?.formMetadata.allowStationSelection;
   }
 
   /**

@@ -1,85 +1,46 @@
-<div class="card border-0">
-  <div class="card-header d-flex justify-content-end align-items-center px-1 py-0">
-    <div class="d-flex align-items-center">
-      <div>
-        <button type="button" class="btn btn-outline-secondary btn-sm me-2"
-          (click)="stationSearch.showDialog( userStationSelectionState.searchedStationIds, getVisibleStationsForSearchDialog())">
-          Search
-        </button>
-        <app-stations-search-dialog #stationSearch (searchedIdsChange)="onSearchInput($event)" />
-      </div>
-      <div *ngIf="filteredStationViews" class="d-flex mx-2 app-cursor-pointer"
-        [class.text-success]="userStationSelectionState.searchedStationIds && userStationSelectionState.searchedStationIds.length > 0"
-        (click)="onSearchInput([])">
-        [{{ filteredStationViews.length | number:'1.0-0' }}]
-      </div>
+<section class="data-entry-landing">
+  <div class="landing-header">
+    <div>
+      <div class="eyebrow">Data Entry</div>
+      <h1>Choose a form</h1>
+      <p>Start with the observation form, then choose the station and entry period inside the form screen.</p>
     </div>
-
   </div>
 
-  <div class="card-body p-0">
-    <div class="app-table-container" style="height: 80vh;">
-      <table class="table table-hover table-sm">
-        <colgroup>
-          <col style="width: 2%;" />
-          <col style="width: 15%;" />
-          <col style="width: 73%;" />
-        </colgroup>
-        <thead>
-          <tr>
-            <th></th>
-            <th>Id</th>
-            <th>Name</th>
-          </tr>
-        </thead>
-        <tbody class="table-group-divider">
-          <ng-container *ngFor="let stationView of filteredStationViews">
-            <tr #stationRow class="app-cursor-pointer" (click)="onStationSelected(stationView)"
-              [id]="'station-row-' + stationView.station.id">
-              <td>
-                <app-toggle-chevron [clickable]="false"
-                  [open]="stationView.station.id === userStationSelectionState.selectedStationId" />
-              </td>
-              <td>{{ stationView.station.id}}</td>
-              <td>{{ stationView.station.name}}</td>
-            </tr>
-
-            <tr *ngIf="stationView.station.id === userStationSelectionState.selectedStationId">
-              <td></td>
-              <td colspan="2">
-                <table class="table table-sm table-hover">
-                  <thead>
-                    <tr>
-                      <th>Forms</th>
-                    </tr>
-                  </thead>
-                  <tbody class="table-group-divider">
-                    <tr *ngFor="let form of stationView.forms" (click)="onFormClick(stationView.station.id, form.id)"
-                      class="app-cursor-pointer">
-                      <td>
-                        <div class="d-flex flex-row">
-                          <div class="d-flex flex-row">
-                            <div><i class="bi bi-arrow-right-short"></i></div>
-                            <div>{{form.name}}</div>
-                          </div>
-                          <div class="ms-1 me-1">-</div>
-                          <div>{{form.description}}</div>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </td>
-
-            </tr>
-
-          </ng-container>
-
-
-        </tbody>
-      </table>
-    </div>
-
+  <div *ngIf="openingErrorMessage" class="alert alert-warning mb-3">
+    {{ openingErrorMessage }}
   </div>
 
-</div>
+  <div *ngIf="isLoadingForms" class="forms-grid">
+    <div class="form-card form-card-loading" *ngFor="let item of [1, 2, 3]">
+      <div class="loading-line loading-line-short"></div>
+      <div class="loading-line"></div>
+      <div class="loading-line"></div>
+    </div>
+  </div>
+
+  <div *ngIf="!isLoadingForms" class="forms-grid">
+    <button type="button" class="form-card" *ngFor="let formCard of formCards" (click)="onFormClick(formCard)">
+      <div class="form-card-top">
+        <span class="form-icon">
+          <i class="bi" [ngClass]="formCard.iconClass"></i>
+        </span>
+        <span class="status-pill" [class.status-placeholder]="!formCard.source">
+          {{ getCardStatus(formCard) }}
+        </span>
+      </div>
+
+      <div class="form-card-body">
+        <div class="cadence">{{ formCard.cadence }}</div>
+        <h2>{{ formCard.title }}</h2>
+        <p>{{ formCard.description }}</p>
+      </div>
+
+      <div class="form-card-action">
+        <span *ngIf="!isOpening(formCard)">Open form</span>
+        <span *ngIf="isOpening(formCard)">Opening...</span>
+        <i class="bi bi-arrow-right"></i>
+      </div>
+    </button>
+  </div>
+</section>

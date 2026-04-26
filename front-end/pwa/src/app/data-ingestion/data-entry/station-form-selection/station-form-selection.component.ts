@@ -1,26 +1,49 @@
-import { Component, ElementRef, OnDestroy, QueryList, ViewChildren } from '@angular/core';
+import { Component, OnDestroy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { PagesDataService } from 'src/app/core/services/pages-data.service';
 import { Subject, takeUntil } from 'rxjs';
 import { AppAuthService } from 'src/app/app-auth.service';
 import { ObservationsService } from '../../services/observations.service';
-import { AppDatabase, AppComponentState, UserAppStateEnum } from 'src/app/app-database';
-import { StationCacheModel } from 'src/app/metadata/stations/services/stations-cache.service';
 import { ViewSourceModel } from 'src/app/metadata/source-specifications/models/view-source.model';
 import { CachedMetadataService } from 'src/app/metadata/metadata-updates/cached-metadata.service';
 import { StationFormsService } from 'src/app/metadata/stations/services/station-forms.service';
 import { StationProcessingMethodEnum } from 'src/app/metadata/stations/models/station-processing-method.enum';
 import { SourceTypeEnum } from 'src/app/metadata/source-specifications/models/source-type.enum';
 
-interface StationView {
-  station: StationCacheModel;
-  forms?: ViewSourceModel[];
+type EntryFormKind = 'hourly' | 'daily' | 'monthly';
+
+interface EntryFormCard {
+  kind: EntryFormKind;
+  title: string;
+  description: string;
+  cadence: string;
+  iconClass: string;
+  source?: ViewSourceModel;
 }
 
-interface StationSelectionState {
-  selectedStationId?: string,
-  searchedStationIds?: string[];
-}
+const FORM_CARDS: EntryFormCard[] = [
+  {
+    kind: 'hourly',
+    title: 'Hourly Data Form',
+    description: 'Key hourly weather observations in a fast grid-style workflow.',
+    cadence: 'Hourly',
+    iconClass: 'bi-clock-history',
+  },
+  {
+    kind: 'daily',
+    title: 'Daily Data Form',
+    description: 'Enter daily summaries and day-level observations.',
+    cadence: 'Daily',
+    iconClass: 'bi-calendar-day',
+  },
+  {
+    kind: 'monthly',
+    title: 'Monthly Data Form',
+    description: 'Capture monthly totals, means, and summary values.',
+    cadence: 'Monthly',
+    iconClass: 'bi-calendar3',
+  },
+];
 
 @Component({
   selector: 'app-station-form-selection',
@@ -28,11 +51,11 @@ interface StationSelectionState {
   styleUrls: ['./station-form-selection.component.scss']
 })
 export class StationFormSelectionComponent implements OnDestroy {
-  @ViewChildren('stationRow', { read: ElementRef }) stationRows!: QueryList<ElementRef>;
-  protected allStationViews!: StationView[];
-  protected filteredStationViews!: StationView[];
-  protected userStationSelectionState: StationSelectionState = {};
-  private formSourcesNotDisabled: ViewSourceModel[] = [];
+  protected formCards: EntryFormCard[] = FORM_CARDS;
+  protected isLoadingForms: boolean = true;
+  protected openingFormKind: EntryFormKind | null = null;
+  protected openingErrorMessage: string = '';
+  private currentUser: any;
   private destroy$ = new Subject<void>();
 
   constructor(
@@ -44,125 +67,113 @@ export class StationFormSelectionComponent implements OnDestroy {
     private router: Router,
     private route: ActivatedRoute) {
 
-    this.pagesDataService.setPageHeader('Select Station');
+    this.pagesDataService.setPageHeader('Data Entry');
+
+    this.appAuthService.user.pipe(
+      takeUntil(this.destroy$),
+    ).subscribe(user => {
+      this.currentUser = user;
+    });
 
     this.cachedMetadataService.allMetadataLoaded.pipe(
       takeUntil(this.destroy$)
     ).subscribe(allMetadataLoaded => {
       if (!allMetadataLoaded) return;
-      // Remove disabled forms
-      this.formSourcesNotDisabled = this.cachedMetadataService.sourcesMetadata.filter(item => item.sourceType === SourceTypeEnum.FORM && !item.disabled);
-
-      // Filter manual and hybrid stations only
-      const allManualStations: StationView[] = this.cachedMetadataService.stationsMetadata.filter(
-        item => item.stationObsProcessingMethod === StationProcessingMethodEnum.MANUAL || item.stationObsProcessingMethod === StationProcessingMethodEnum.HYBRID
-      ).map(data => { return { station: data } });
-      this.setStationsBasedOnPermissions(allManualStations);
+      this.formCards = this.buildFormCards(this.cachedMetadataService.sourcesMetadata);
+      this.isLoadingForms = false;
     });
 
     this.observationService.syncObservations();
   }
 
-
   ngOnDestroy() {
-    // Save the state before destroying
-    AppDatabase.instance.userSettings.put({ name: UserAppStateEnum.DATA_ENTRY_STATION_SELECTION, parameters: this.userStationSelectionState });
-  
     this.destroy$.next();
     this.destroy$.complete();
   }
 
-  private setStationsBasedOnPermissions(allManualStations: StationView[]) {
-    this.appAuthService.user.pipe(
+  protected onFormClick(formCard: EntryFormCard): void {
+    this.openingErrorMessage = '';
+
+    if (!formCard.source) {
+      this.router.navigate(['form-placeholder', formCard.kind], { relativeTo: this.route.parent });
+      return;
+    }
+
+    this.openingFormKind = formCard.kind;
+    let formOpened = false;
+    this.stationFormsService.getStationsAssignedToUseForm(formCard.source.id).pipe(
       takeUntil(this.destroy$),
-    ).subscribe(user => {
-      if (!user) return;
+    ).subscribe({
+      next: stationIds => {
+        const stationId = this.getFirstPermittedManualStationId(stationIds);
+        if (!stationId || formOpened) return;
 
-      if (user.isSystemAdmin) {
-        this.allStationViews = allManualStations;
-      } else if (user.permissions && user.permissions.entryPermissions) {
-        if (user.permissions.entryPermissions.stationIds) {
-          const stationIdsAllowed: string[] = user.permissions.entryPermissions.stationIds;
-          this.allStationViews = allManualStations.filter(item => stationIdsAllowed.includes(item.station.id));
-        } else {
-          this.allStationViews = allManualStations;
-        }
-      } else {
-        throw new Error('Data entry not allowed');
+        formOpened = true;
+        this.router.navigate(
+          ['form-entry', stationId, formCard.source!.id],
+          { relativeTo: this.route.parent, queryParams: { from: 'forms' } }
+        );
+      },
+      error: () => {
+        this.openingFormKind = null;
+        this.openingErrorMessage = 'This form could not load its assigned stations. Try again when metadata sync is available.';
+      },
+      complete: () => {
+        if (formOpened) return;
+        this.openingFormKind = null;
+        this.openingErrorMessage = 'This form has no permitted manual stations assigned yet.';
       }
-
-      this.filteredStationViews = this.allStationViews;
-      this.loadAndRestoreUserStationSelectionState()
     });
   }
 
-  protected async loadAndRestoreUserStationSelectionState() {
-    const savedUserStationSelectionState: AppComponentState | undefined = await AppDatabase.instance.userSettings.get(UserAppStateEnum.DATA_ENTRY_STATION_SELECTION);
-    if (savedUserStationSelectionState) {
-      this.userStationSelectionState = savedUserStationSelectionState.parameters;
-      const searchedStationIds = this.userStationSelectionState.searchedStationIds;
-      if (searchedStationIds && searchedStationIds.length > 0) {
-        this.filteredStationViews = this.allStationViews.filter(item => searchedStationIds.includes(item.station.id));
-      }
-
-      const selectedStationId = this.userStationSelectionState.selectedStationId;
-      if (selectedStationId) {
-        const stationView = this.filteredStationViews.find(stationView => stationView.station.id === selectedStationId);
-        if (stationView) {
-          this.loadFormsForStation(stationView);
-          // After state is loaded and properties are set, scroll to the last selected station
-          // We use a setTimeout to ensure the view has been updated with the new data
-          // before we try to find the element.
-          setTimeout(() => {
-            const documentElementId = `station-row-${selectedStationId}`;
-            const selectedStationRow = this.stationRows.find(el => el.nativeElement.id === documentElementId);
-            if (selectedStationRow) {
-              selectedStationRow.nativeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }, 0);
-        }
-      }
-
-    }
+  protected getCardStatus(formCard: EntryFormCard): string {
+    return formCard.source ? 'Available' : 'Placeholder';
   }
 
-  protected getVisibleStationsForSearchDialog(): string[] {
-    return this.allStationViews.map(item => item.station.id);
+  protected isOpening(formCard: EntryFormCard): boolean {
+    return this.openingFormKind === formCard.kind;
   }
 
-  protected onSearchInput(searchedIds: string[]): void {
-    if (searchedIds.length > 0) {
-      this.filteredStationViews = this.allStationViews.filter(item => searchedIds.includes(item.station.id));
-      this.userStationSelectionState.searchedStationIds = searchedIds;
-    } else {
-      this.filteredStationViews = this.allStationViews;
-      this.userStationSelectionState.searchedStationIds = undefined;
-    }
+  private buildFormCards(sources: ViewSourceModel[]): EntryFormCard[] {
+    const formSources = sources.filter(source => source.sourceType === SourceTypeEnum.FORM && !source.disabled);
+
+    return FORM_CARDS.map(card => {
+      return {
+        ...card,
+        source: this.findSourceForKind(card.kind, formSources),
+      };
+    });
   }
 
-  protected onStationSelected(stationView: StationView): void {
-    if (stationView.station.id === this.userStationSelectionState.selectedStationId) {
-      this.userStationSelectionState.selectedStationId = undefined; // Will hide the forms 
-    } else {
-      this.userStationSelectionState.selectedStationId = stationView.station.id;
-      this.loadFormsForStation(stationView);
-    }
+  private findSourceForKind(kind: EntryFormKind, sources: ViewSourceModel[]): ViewSourceModel | undefined {
+    const exactName = `${kind} data form`;
+    const sourceByExactName = sources.find(source => source.name.trim().toLowerCase() === exactName);
+    if (sourceByExactName) return sourceByExactName;
+
+    return sources.find(source => {
+      const searchableText = `${source.name} ${source.description ?? ''}`.toLowerCase();
+      return searchableText.includes(kind);
+    });
   }
 
-  protected onFormClick(stationId: string, sourceId: number): void {
-    this.router.navigate(['form-entry', stationId, sourceId], { relativeTo: this.route.parent });
-  }
+  private getFirstPermittedManualStationId(stationIdsAssignedToForm: string[]): string | null {
+    const manualStationIds = new Set(
+      this.cachedMetadataService.stationsMetadata
+        .filter(station =>
+          station.stationObsProcessingMethod === StationProcessingMethodEnum.MANUAL ||
+          station.stationObsProcessingMethod === StationProcessingMethodEnum.HYBRID
+        )
+        .map(station => station.id)
+    );
 
-  private loadFormsForStation(stationView: StationView): void {
-    // No need to reload the station forms if already loaded if they have
-    if (!stationView.forms) {
-      this.stationFormsService.getFormsAssignedToStation(stationView.station.id).pipe(
-        takeUntil(this.destroy$)
-      ).subscribe(data => {
-        //Filter out any disabled form
-        stationView.forms = data.filter(stationForm => this.formSourcesNotDisabled.find(form => stationForm.id === form.id));
-      });
-    }
-  }
+    const manualAssignedStationIds = stationIdsAssignedToForm.filter(stationId => manualStationIds.has(stationId));
+    if (manualAssignedStationIds.length === 0) return null;
 
+    if (!this.currentUser || this.currentUser.isSystemAdmin) return manualAssignedStationIds[0];
+
+    const permittedStationIds: string[] | undefined = this.currentUser.permissions?.entryPermissions?.stationIds;
+    if (!permittedStationIds || permittedStationIds.length === 0) return manualAssignedStationIds[0];
+
+    return manualAssignedStationIds.find(stationId => permittedStationIds.includes(stationId)) ?? null;
+  }
 }
