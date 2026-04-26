@@ -1,57 +1,86 @@
-<div class="card border-0">
-    <div>
-        <app-query-selection [parentComponentName]="componentName" [enableQueryButton]="enableQueryButton"
-            [inputFilter]="queryFilter" (queryClick)="onQueryClick($event)" />
+<section class="explorer-shell cdms-page-shell">
+    <div class="explorer-header">
+        <div>
+            <div class="section-kicker">Observation Query</div>
+            <h2>Data Explorer</h2>
+            <p>Browse observations saved through manual forms, CSV import, and AWS ingestion.</p>
+        </div>
+        <div class="header-metric">
+            <span class="metric-value">{{ pageInputDefinition.totalRowCount || 0 }}</span>
+            <span class="metric-label">matched rows</span>
+        </div>
     </div>
 
-    <div class="card border-0 p-0 mt-2">
-        <div class="card-header d-flex justify-content-between px-0 py-1 align-items-center">
-            <div class="fw-bold ms-1">Showing Entries</div>
-            <div *ngIf="pageInputDefinition.totalRowCount" class="d-flex">
-                <app-page-input [pageInputDefinition]="pageInputDefinition" (pageInputDefinitionChange)="loadData()" />
-                <div *ngIf="numOfChanges" class="d-flex align-items-center">
-                    <div class="vr mx-2"></div>
-                    <div class=" text-success me-2">Total Changes: {{numOfChanges}}</div>
+    <div class="filter-panel">
+        <app-query-selection [parentComponentName]="componentName" [enableQueryButton]="enableQueryButton"
+            [inputFilter]="queryFilter" [layoutMode]="'workspace'" [queryButtonLabel]="'Search'"
+            [advancedToggleLabel]="'More Filters'" [displayFilterHeader]="false" (queryClick)="onQueryClick($event)" />
+    </div>
+
+    <div class="results-panel">
+        <div class="results-toolbar">
+            <div>
+                <div class="results-title">Observation Results</div>
+                <div class="results-subtitle" *ngIf="hasQueried && pageInputDefinition.totalRowCount">
+                    Showing page {{ pageInputDefinition.page }} of {{ pageInputDefinition.totalPages }}
+                </div>
+                <div class="results-subtitle" *ngIf="!hasQueried">
+                    Choose filters and search to load observations from the shared observation store.
                 </div>
             </div>
+            <app-page-input *ngIf="pageInputDefinition.totalRowCount" [pageInputDefinition]="pageInputDefinition"
+                (pageInputDefinitionChange)="loadData()" />
         </div>
 
-        <div class="card-body p-0 mt-2">
-            <div class="app-table-container">
-                <table class="table table-hover table-sm">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Station</th>
-                            <th>Element</th>
-                            <th>Level</th>
-                            <th>Date Time</th>
-                            <th>Interval</th>
-                            <th>Source</th>
-                            <th>Value & Flag</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr *ngFor="let obsEntry of observationsEntries; let i = index;"
-                            [class.group-row-border]="includeLowerBoundaryLine(i)">
-                            <td>{{ getRowNumber(i) }}</td>
-                            <td> {{ obsEntry.observation.stationId + '-' + obsEntry.stationName }}</td>
-                            <td>{{ obsEntry.observation.elementId + '-' + obsEntry.elementAbbrv}}</td>
-                            <td>{{ obsEntry.observation.level }}</td>
-                            <td>{{ obsEntry.formattedDatetime }}</td>
-                            <td>{{ obsEntry.intervalName }}</td>
-                            <td>{{ obsEntry.sourceName }}</td>
-                            <td>
-                                <div class="px-2 app-value-flag-container">
-                                    <app-value-flag-input [id]="i + '_vf'" [displayExtraInfoOption]="true"
-                                        [observationEntry]="obsEntry" [disableValueFlagEntry]="true" />
-                                </div>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+        <div *ngIf="isLoading" class="state-panel">
+            Loading observations...
+        </div>
+
+        <div *ngIf="!isLoading && hasQueried && !pageInputDefinition.totalRowCount" class="state-panel">
+            No observations matched the selected filters.
+        </div>
+
+        <div *ngIf="!isLoading && observationsEntries?.length" class="table-wrap">
+            <table class="table table-hover align-middle observation-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Station</th>
+                        <th>Element</th>
+                        <th>Datetime</th>
+                        <th class="text-end">Value</th>
+                        <th>Interval</th>
+                        <th>Source</th>
+                        <th>QC Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr *ngFor="let obsEntry of observationsEntries; let i = index;"
+                        [class.group-row-border]="includeLowerBoundaryLine(i)">
+                        <td class="row-number">{{ getRowNumber(i) }}</td>
+                        <td>
+                            <div class="primary-cell">{{ obsEntry.stationName }}</div>
+                            <div class="secondary-cell">{{ obsEntry.observation.stationId }}</div>
+                        </td>
+                        <td>
+                            <div class="primary-cell">{{ obsEntry.elementAbbrv }}</div>
+                            <div class="secondary-cell">Element {{ obsEntry.observation.elementId }}</div>
+                        </td>
+                        <td>{{ obsEntry.formattedDatetime }}</td>
+                        <td class="text-end value-cell">{{ getValueLabel(obsEntry.observation) }}</td>
+                        <td>{{ obsEntry.intervalName }}</td>
+                        <td>
+                            <div class="primary-cell">{{ obsEntry.sourceName }}</div>
+                            <div class="secondary-cell">{{ getSourceLabel(obsEntry.observation, obsEntry.sourceName) }}</div>
+                        </td>
+                        <td>
+                            <span class="status-pill" [ngClass]="getQcStatusClass(obsEntry.observation.qcStatus)">
+                                {{ obsEntry.observation.qcStatus }}
+                            </span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
     </div>
-
-</div>
+</section>

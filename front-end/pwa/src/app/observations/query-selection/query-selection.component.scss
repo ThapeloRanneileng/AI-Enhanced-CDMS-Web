@@ -3,9 +3,10 @@
 }
 
 .workspace-filter-shell {
-  background: #f3f5f2;
-  border: 1px solid #d9dfd2;
-  border-radius: 16px;
+  background: #f8fbff;
+  border: 1px solid #dce7f3;
+  border-radius: 18px;
+  box-shadow: 0 14px 34px rgba(22, 59, 109, 0.08);
   padding: 0.9rem 1rem;
 }
 
@@ -27,9 +28,9 @@
 .workspace-label {
   display: inline-block;
   margin-bottom: 0.35rem;
-  color: #52606d;
+  color: #52657d;
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -44,7 +45,7 @@
 .workspace-advanced-panel {
   margin-top: 0.8rem;
   padding-top: 0.8rem;
-  border-top: 1px solid #d9dfd2;
+  border-top: 1px solid #dce7f3;
 }
 
 .workspace-advanced-grid {

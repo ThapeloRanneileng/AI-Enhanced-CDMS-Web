@@ -10,6 +10,8 @@ import { ObservationsService } from 'src/app/data-ingestion/services/observation
 import { ActivatedRoute } from '@angular/router';
 import { CachedMetadataService } from 'src/app/metadata/metadata-updates/cached-metadata.service';
 import { ObservationEntry } from 'src/app/observations/models/observation-entry.model';
+import { ViewObservationModel } from 'src/app/data-ingestion/models/view-observation.model';
+import { QCStatusEnum } from 'src/app/data-ingestion/models/qc-status.enum';
 
 
 @Component({
@@ -24,6 +26,8 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
   protected enableQueryButton: boolean = true;
   protected numOfChanges: number = 0;
   protected allBoundariesIndices: number[] = [];
+  protected hasQueried: boolean = false;
+  protected isLoading: boolean = false;
   private utcOffset!: number;
   private allMetadataLoaded: boolean = false;
 
@@ -56,6 +60,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
 
       const stationIds: string[] = params.getAll('stationIds');
       const elementIds: string[] = params.getAll('elementIds');
+      const sourceIds: string[] = params.getAll('sourceIds');
       const intervals: string[] = params.getAll('intervals');
       const level: string | null = params.get('level');
       const fromDate: string | null = params.get('fromDate');
@@ -64,6 +69,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
       this.queryFilter = { deleted: false };
       if (stationIds.length > 0) this.queryFilter.stationIds = stationIds;
       if (elementIds.length > 0) this.queryFilter.elementIds = elementIds.map(Number);
+      if (sourceIds.length > 0) this.queryFilter.sourceIds = sourceIds.map(Number);
       if (intervals.length > 0) this.queryFilter.intervals = intervals.map(Number);
       if (level !== null) this.queryFilter.level = Number(level);
       if (fromDate) this.queryFilter.fromDate = fromDate;
@@ -85,7 +91,8 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
 
   protected onQueryClick(observationFilter: ViewObservationQueryModel): void {
     // Get the data based on the selection filter
-    this.queryFilter = observationFilter;
+    this.queryFilter = { ...observationFilter, deleted: false };
+    this.pageInputDefinition.onFirst();
     this.queryData();
   }
 
@@ -94,9 +101,9 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
       return;
     }
 
-    console.log('querying data...');
-
     this.enableQueryButton = false;
+    this.isLoading = true;
+    this.hasQueried = true;
     this.observationsEntries = [];
     this.pageInputDefinition.setTotalRowCount(0);
     this.observationService.count(this.queryFilter).pipe(take(1)).subscribe(
@@ -107,12 +114,13 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
           if (count > 0) {
             this.loadData();
           } else {
-            this.pagesDataService.showToast({ title: 'Data Exploration', message: 'No data', type: ToastEventTypeEnum.INFO });
+            this.isLoading = false;
           }
         },
         error: err => {
           this.pagesDataService.showToast({ title: 'Data Exploration', message: err, type: ToastEventTypeEnum.ERROR });
           this.enableQueryButton = true;
+          this.isLoading = false;
         },
       });
   }
@@ -120,6 +128,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
 
   protected loadData(): void {
     this.enableQueryButton = false;
+    this.isLoading = true;
     this.numOfChanges = 0;
     this.allBoundariesIndices = [];
     this.observationsEntries = [];
@@ -141,9 +150,9 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
             confirmAsCorrect: false,
             delete: false,
             change: 'no_change', 
-            stationName: stationMetadata.name,
-            elementAbbrv: elementMetadata.name,
-            sourceName: sourceMetadata.name,
+            stationName: stationMetadata?.name ?? observation.stationId,
+            elementAbbrv: elementMetadata?.name ?? observation.elementId.toString(),
+            sourceName: observation.sourceName ?? sourceMetadata?.name ?? observation.sourceId.toString(),
             formattedDatetime: DateUtils.getPresentableDatetime(observation.datetime, this.utcOffset),
             intervalName: IntervalsUtil.getIntervalName(observation.interval), 
           }
@@ -157,9 +166,11 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
       error: err => {
         this.pagesDataService.showToast({ title: 'Data Exploration', message: err, type: ToastEventTypeEnum.ERROR });
         this.enableQueryButton = true;
+        this.isLoading = false;
       },
       complete: () => {
         this.enableQueryButton = true;
+        this.isLoading = false;
       }
     });
   }
@@ -189,5 +200,28 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
 
   protected getRowNumber(currentRowIndex: number): number {
     return NumberUtils.getRowNumber(this.pageInputDefinition.page, this.pageInputDefinition.pageSize, currentRowIndex);
+  }
+
+  protected getSourceLabel(observation: ViewObservationModel, sourceName?: string): string {
+    return observation.observationOrigin ?? sourceName ?? observation.sourceId.toString();
+  }
+
+  protected getValueLabel(observation: ViewObservationModel): string {
+    if (observation.value === null || observation.value === undefined) {
+      return observation.flag ?? '';
+    }
+
+    return observation.flag ? `${observation.value} ${observation.flag}` : observation.value.toString();
+  }
+
+  protected getQcStatusClass(qcStatus: QCStatusEnum): string {
+    switch (qcStatus) {
+      case QCStatusEnum.PASSED:
+        return 'status-passed';
+      case QCStatusEnum.FAILED:
+        return 'status-failed';
+      default:
+        return 'status-none';
+    }
   }
 }

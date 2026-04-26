@@ -56,7 +56,7 @@
             <app-toggle-chevron [(open)]="displayFilterControls">Filter</app-toggle-chevron>
         </div>
         <div *ngIf="displayFilterControls" class="card-body p-0 mt-2">
-            <div class="d-flex justify-content-between align-items-end">
+            <div class="d-flex justify-content-between align-items-end flex-wrap gap-3">
                 <div class="row g-2 px-2">
                     <div *ngIf="displayStationSelector" class="col-auto mb-2">
                         <app-station-selector-multiple [label]="'Stations'" [(selectedIds)]="stationIds"
@@ -95,8 +95,8 @@
                     </div>
                 </div>
 
-                <div>
-                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                <div class="px-2 pb-2">
+                    <button type="button" class="btn btn-primary btn-sm"
                         [disabled]=" !queryAllowed || !enableQueryButton " (click)="onQueryClick()">
                         {{ queryButtonLabel }}
                     </button>
