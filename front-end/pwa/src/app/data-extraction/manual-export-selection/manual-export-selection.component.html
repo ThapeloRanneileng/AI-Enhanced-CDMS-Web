@@ -1,15 +1,27 @@
-<div *ngIf="exports" class="card border-0">
-   <div class="card-header d-flex justify-content-end   align-items-center px-1 py-0">
-      <div class="mb-1 d-flex">
-         <!-- <button type="button" class="btn btn-outline-secondary btn-sm" (click)="onSearch()">
-               Search
-           </button> -->
+<section *ngIf="exports" class="cdms-page-shell">
+   <div class="cdms-page-header">
+      <div>
+         <span class="eyebrow">Data extraction</span>
+         <h2>Reports</h2>
+         <p>Select an export definition to configure stations, elements, intervals, and the observation date range.</p>
+      </div>
+      <div class="cdms-header-meta">
+         <span class="cdms-header-chip">{{ exports.length }} available exports</span>
       </div>
    </div>
 
-   <div class="card-body px-0">
-      <app-table-view [clickable]="true"
-         [columnsData]="[ {id: 'name', name: 'Name'} , {id: 'description', name: 'Description'} ]" [rowsData]="exports"
-         (rowDataClicked)="onExportClick($event)" />
+   <div class="card border-0 cdms-export-card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+         <div>
+            <div class="cdms-panel-title">Export definitions</div>
+            <div class="cdms-panel-subtitle">Open a report to prepare a manual data export.</div>
+         </div>
+      </div>
+
+      <div class="card-body px-0">
+         <app-table-view [clickable]="true"
+            [columnsData]="[ {id: 'name', name: 'Name'} , {id: 'description', name: 'Description'} ]"
+            [rowsData]="exports" (rowDataClicked)="onExportClick($event)" />
+      </div>
    </div>
-</div>
+</section>
