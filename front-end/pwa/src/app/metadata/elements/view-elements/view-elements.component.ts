@@ -23,6 +23,7 @@ export class ViewElementsComponent implements OnDestroy {
   @ViewChild('dlgBulkEditElements') dlgBulkEditElements!: BulkEditElementsDialogComponent;
   @ViewChild('dlgSearchElements') dlgSearchElements!: ElementsSearchDialogComponent;
   @ViewChild('dlgDeleteAllConfirm') dlgDeleteAllConfirm!: DeleteConfirmationDialogComponent;
+  @ViewChild('dlgDeleteConfirm') dlgDeleteConfirm!: DeleteConfirmationDialogComponent;
 
   protected allElements: ElementCacheModel[] = [];
   protected elements: ElementCacheModel[] = [];
@@ -33,6 +34,7 @@ export class ViewElementsComponent implements OnDestroy {
   protected pageInputDefinition: PagingParameters = new PagingParameters();
   protected sortColumn: string = '';
   protected sortDirection: 'asc' | 'desc' = 'asc';
+  protected selectedElement: ElementCacheModel | null = null;
 
   private destroy$ = new Subject<void>();
 
@@ -169,6 +171,28 @@ export class ViewElementsComponent implements OnDestroy {
   protected onDeleteAllConfirm(): void {
     this.elementsCacheService.deleteAll().pipe(take(1)).subscribe(data => {
       this.pagesDataService.showToast({ title: "Elements Deleted", message: `All elements deleted`, type: ToastEventTypeEnum.SUCCESS });
+    });
+  }
+
+  protected onDeleteClick(element: ElementCacheModel, event: Event): void {
+    event.stopPropagation();
+    this.selectedElement = element;
+    this.dlgDeleteConfirm.openDialog();
+  }
+
+  protected onDeleteConfirm(): void {
+    if (!this.selectedElement) return;
+
+    const element = this.selectedElement;
+    this.elementsCacheService.delete(element.id).pipe(take(1)).subscribe({
+      next: () => {
+        this.pagesDataService.showToast({ title: 'Element Deleted', message: `${element.abbreviation} - ${element.name} deleted`, type: ToastEventTypeEnum.SUCCESS });
+        this.selectedElement = null;
+      },
+      error: err => {
+        const message = err.error?.message || err.message || 'Element could not be deleted';
+        this.pagesDataService.showToast({ title: 'Element Delete Failed', message, type: ToastEventTypeEnum.ERROR, timeout: 10000 });
+      }
     });
   }
 

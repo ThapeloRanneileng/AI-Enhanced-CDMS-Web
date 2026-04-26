@@ -19,6 +19,7 @@ export class ViewStationsComponent implements OnDestroy {
   @ViewChild('dlgBulkEditStations') dlgBulkEditStations!: BulkEditStationsDialogComponent;
   @ViewChild('dlgStationInput') dlgStationInput!: StationInputDialogComponent;
   @ViewChild('dlgDeleteAllConfirm') dlgDeleteAllConfirm!: DeleteConfirmationDialogComponent;
+  @ViewChild('dlgDeleteConfirm') dlgDeleteConfirm!: DeleteConfirmationDialogComponent;
 
   protected allStations: StationCacheModel[] = [];
   protected stations: StationCacheModel[] = [];
@@ -34,6 +35,7 @@ export class ViewStationsComponent implements OnDestroy {
   protected showGeoMapDialog = false;
   protected showTreeMapDialog = false;
   protected isSystemAdmin: boolean = false;
+  protected selectedStation: StationCacheModel | null = null;
 
   private destroy$ = new Subject<void>();
 
@@ -160,6 +162,28 @@ export class ViewStationsComponent implements OnDestroy {
       take(1),
     ).subscribe(data => {
       this.pagesDataService.showToast({ title: "Stations Deleted", message: `All stations deleted`, type: ToastEventTypeEnum.SUCCESS });
+    });
+  }
+
+  protected onDeleteClick(station: StationCacheModel, event: Event): void {
+    event.stopPropagation();
+    this.selectedStation = station;
+    this.dlgDeleteConfirm.openDialog();
+  }
+
+  protected onDeleteConfirm(): void {
+    if (!this.selectedStation) return;
+
+    const station = this.selectedStation;
+    this.stationsCacheService.delete(station.id).pipe(take(1)).subscribe({
+      next: () => {
+        this.pagesDataService.showToast({ title: 'Station Deleted', message: `${station.id} - ${station.name} deleted`, type: ToastEventTypeEnum.SUCCESS });
+        this.selectedStation = null;
+      },
+      error: err => {
+        const message = err.error?.message || err.message || 'Station could not be deleted';
+        this.pagesDataService.showToast({ title: 'Station Delete Failed', message, type: ToastEventTypeEnum.ERROR, timeout: 10000 });
+      }
     });
   }
 

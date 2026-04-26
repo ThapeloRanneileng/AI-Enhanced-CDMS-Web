@@ -58,6 +58,7 @@
               (sort)="onSort($event)">Scale Factor</th>
             <th appSortableHeader="comment" [sortColumn]="sortColumn" [sortDirection]="sortDirection"
               (sort)="onSort($event)">Comment</th>
+            <th *ngIf="isSystemAdmin">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -71,6 +72,12 @@
             <td>{{ element.typeName }}</td>
             <td>{{ element.entryScaleFactor }}</td>
             <td>{{ element.comment }}</td>
+            <td *ngIf="isSystemAdmin">
+              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete element"
+                (click)="onDeleteClick(element, $event)">
+                <i class="bi bi-trash"></i>
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -80,4 +87,8 @@
 
   <app-delete-confirmation-dialog #dlgDeleteAllConfirm [itemName]="'All'" [itemType]="'element'"
     (deleteConfirmed)="onDeleteAllConfirm()" />
+
+  <app-delete-confirmation-dialog #dlgDeleteConfirm
+    [itemName]="selectedElement ? selectedElement.abbreviation + ' - ' + selectedElement.name : ''"
+    [itemType]="'element'" (deleteConfirmed)="onDeleteConfirm()" />
 </div>

@@ -1,3 +1,15 @@
+<section class="cdms-page-shell">
+  <div class="cdms-page-header">
+    <div>
+      <span class="eyebrow">AI-Enhanced CDMS</span>
+      <h2>Stations</h2>
+      <p>Manage station metadata in the same clean management layout used across AI, QC, and monitoring workflows.</p>
+    </div>
+    <div class="cdms-header-meta">
+      <span class="cdms-header-chip">{{ pageInputDefinition.totalRowCount || 0 }} stations</span>
+    </div>
+  </div>
+
 <div class="card border-0">
   <div class="card-header d-flex justify-content-end align-items-end px-1">
     <div class="d-flex align-items-end">
@@ -87,6 +99,7 @@
               (sort)="onSort($event)">Date Closed</th>
             <th appSortableHeader="comment" [sortColumn]="sortColumn" [sortDirection]="sortDirection"
               (sort)="onSort($event)">Comment</th>
+            <th *ngIf="isSystemAdmin">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -110,6 +123,12 @@
             <td class="text-nowrap">{{ station.dateEstablished }}</td>
             <td class="text-nowrap">{{ station.dateClosed }}</td>
             <td>{{ station.comment }}</td>
+            <td *ngIf="isSystemAdmin">
+              <button type="button" class="btn btn-sm btn-outline-danger" title="Delete station"
+                (click)="onDeleteClick(station, $event)">
+                <i class="bi bi-trash"></i>
+              </button>
+            </td>
           </tr>
         </tbody>
       </table>
@@ -132,3 +151,8 @@
 
 <app-delete-confirmation-dialog #dlgDeleteAllConfirm [itemName]="'All'" [itemType]="'station'"
   (deleteConfirmed)="onDeleteAllConfirm()" />
+
+<app-delete-confirmation-dialog #dlgDeleteConfirm
+  [itemName]="selectedStation ? selectedStation.id + ' - ' + selectedStation.name : ''" [itemType]="'station'"
+  (deleteConfirmed)="onDeleteConfirm()" />
+</section>
