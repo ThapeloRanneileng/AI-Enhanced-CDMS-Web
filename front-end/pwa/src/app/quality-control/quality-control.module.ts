@@ -10,6 +10,7 @@ import { DataIngestionModule } from '../data-ingestion/data-ingestion.module';
 import { QueryQCDataChecksComponent } from './qc-data-checks/query-qc-data-checks/query-qc-data-checks.component';
 import { PerformQCDialogComponent } from './qc-data-checks/perform-qc-dialog/perform-qc-dialog.component';
 import { AiAnomalyCenterComponent } from './ai-anomaly-center/ai-anomaly-center.component';
+import { AiAnomalyManagementComponent } from './ai-anomaly-management/ai-anomaly-management.component';
 
 @NgModule({
 
@@ -19,6 +20,7 @@ import { AiAnomalyCenterComponent } from './ai-anomaly-center/ai-anomaly-center.
     PerformQCDialogComponent,
     QueryQCDataChecksComponent,
     AiAnomalyCenterComponent,
+    AiAnomalyManagementComponent,
   ],
   imports: [
     QualityControlRoutingModule,

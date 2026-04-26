@@ -8,6 +8,7 @@ import {
 import { AnomalyFeatureBuilderService, ObservationAnomalyFeatureSet } from './anomaly-feature-builder.service';
 import { AnomalyModelRegistryService } from './anomaly-model-registry.service';
 import { NumberUtils } from 'src/shared/utils/number.utils';
+import { AnomalyBaselineModelService, BaselineModelScore } from './anomaly-baseline-model.service';
 
 export interface ObservationAnomalyDetectionResult {
   stationId: string;
@@ -35,6 +36,7 @@ export class ObservationAnomalyDetectionService {
   constructor(
     private featureBuilderService: AnomalyFeatureBuilderService,
     private modelRegistryService: AnomalyModelRegistryService,
+    private baselineModelService: AnomalyBaselineModelService,
   ) { }
 
   public async detectObservationAnomaly(observation: ObservationEntity): Promise<ObservationAnomalyDetectionResult> {
@@ -62,6 +64,11 @@ export class ObservationAnomalyDetectionService {
         featureSnapshot: featureSet.features,
         contributingSignals: [],
       };
+    }
+
+    const trainedModelScores = this.modelRegistryService.scoreWithRegisteredModels(observation, featureSet.features, this.baselineModelService);
+    if (trainedModelScores.length > 0) {
+      return this.buildTrainedModelResult(observation, featureSet, trainedModelScores);
     }
 
     const rollingHistoryCount = this.getNumericFeature(featureSet.features.rollingHistoryCount);
@@ -159,6 +166,47 @@ export class ObservationAnomalyDetectionService {
     }
 
     return null;
+  }
+
+  private buildTrainedModelResult(
+    observation: ObservationEntity,
+    featureSet: ObservationAnomalyFeatureSet,
+    modelScores: BaselineModelScore[],
+  ): ObservationAnomalyDetectionResult {
+    const anomalyScore = NumberUtils.roundOff(modelScores.reduce((sum, score) => sum + score.anomalyScore, 0) / modelScores.length, 4);
+    const confidenceScore = NumberUtils.roundOff(modelScores.reduce((sum, score) => sum + score.confidence, 0) / modelScores.length, 4);
+    const strongestScore = modelScores.reduce((strongest, score) => score.anomalyScore > strongest.anomalyScore ? score : strongest, modelScores[0]);
+    const severity = this.mapSeverity(anomalyScore);
+    const outcome = this.mapOutcome(severity);
+    const contributingSignals = modelScores.map((score) => this.buildSignal(
+      score.modelName,
+      'trained_baseline_distance',
+      score.anomalyScore,
+      0,
+      score.anomalyScore,
+    ));
+
+    return {
+      stationId: observation.stationId,
+      elementId: observation.elementId,
+      level: observation.level,
+      interval: observation.interval,
+      sourceId: observation.sourceId,
+      datetime: observation.datetime.toISOString(),
+      modelId: strongestScore.modelId,
+      modelFamily: 'trained_baseline_ensemble',
+      modelVersion: strongestScore.modelVersion,
+      confidenceScore,
+      anomalyScore,
+      severity,
+      outcome,
+      reasons: [
+        ...modelScores.map((score) => score.explanation),
+        `Final decision ${outcome} from ${modelScores.length} trained baseline model(s)`,
+      ],
+      featureSnapshot: featureSet.features,
+      contributingSignals: contributingSignals.sort((left, right) => right.contributionScore - left.contributionScore),
+    };
   }
 
   private normalizeZScore(zScore: number): number {

@@ -28,4 +28,5 @@ export class ObservationAnomalyAssessmentsController {
   public countForReviewWorkspace(@Query(AuthorisedStationsPipe) queryDto: ViewObservationAnomalyAssessmentQueryDto) {
     return this.observationAnomalyAssessmentsQueryService.count(queryDto);
   }
+
 }

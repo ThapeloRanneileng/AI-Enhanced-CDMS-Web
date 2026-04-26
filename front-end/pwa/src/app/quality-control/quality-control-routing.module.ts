@@ -3,6 +3,7 @@ import { RouterModule, Routes } from '@angular/router';
 import { SourceChecksComponent } from './source-checks/source-checks.component';
 import { QCAssessmentComponent } from './qc-data-checks/qc-assessment.component';
 import { AiAnomalyCenterComponent } from './ai-anomaly-center/ai-anomaly-center.component';
+import { AiAnomalyManagementComponent } from './ai-anomaly-management/ai-anomaly-management.component';
 
 const routes: Routes = [
   {
@@ -28,6 +29,10 @@ const routes: Routes = [
       {
         path: 'ai-anomaly-center',
         component: AiAnomalyCenterComponent
+      },
+      {
+        path: 'ai-anomaly-management',
+        component: AiAnomalyManagementComponent
       },
     ]
   }

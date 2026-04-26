@@ -37,11 +37,13 @@ export class AnomalyFeatureBuilderService {
 
     const rollingValues = await this.getRollingValues(observation, this.rollingWindowSize);
     const seasonalValues = await this.getSeasonalValues(observation, this.seasonalWindowSize);
+    const previousValue = rollingValues.length > 0 ? rollingValues[0] : null;
     const rollingSummary = this.summarizeValues(rollingValues);
     const seasonalSummary = this.summarizeValues(seasonalValues);
 
     const rollingZScore = this.computeZScore(observation.value, rollingSummary.mean, rollingSummary.stdDev);
     const seasonalZScore = this.computeZScore(observation.value, seasonalSummary.mean, seasonalSummary.stdDev);
+    const observationMonth = observation.datetime.getUTCMonth() + 1;
 
     return {
       stationId: observation.stationId,
@@ -54,6 +56,8 @@ export class AnomalyFeatureBuilderService {
         value: observation.value,
         flag: observation.flag,
         qcStatus: observation.qcStatus,
+        previousValue,
+        differenceFromPrevious: observation.value === null || previousValue === null ? null : observation.value - previousValue,
         rollingHistoryCount: rollingSummary.count,
         rollingMean: rollingSummary.mean,
         rollingStdDev: rollingSummary.stdDev,
@@ -66,6 +70,9 @@ export class AnomalyFeatureBuilderService {
         seasonalMin: seasonalSummary.min,
         seasonalMax: seasonalSummary.max,
         seasonalZScore,
+        month: observationMonth,
+        season: Math.floor((observationMonth - 1) / 3) + 1,
+        hour: observation.interval < 1440 ? observation.datetime.getUTCHours() : null,
       }
     };
   }
