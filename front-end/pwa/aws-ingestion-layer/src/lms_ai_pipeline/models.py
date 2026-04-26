@@ -19,12 +19,20 @@ class AutoencoderConfig:
     patience: int = 5
     contamination: float = 0.05
     max_training_rows: int = 50000
+    calibration: str = "station_element_quantile"
+    suspect_quantile: float = 0.99
+    failed_quantile: float = 0.999
+    min_group_rows: int = 500
+    min_element_rows: int = 2000
 
 
 AUTOENCODER_STATUS_FIELDS = [
     "modelName", "status", "tensorflowInstalled", "kerasInstalled", "tensorflowVersion", "kerasVersion",
     "cpuDevices", "gpuDevices", "epochs", "batchSize", "validationSplit", "patience", "contamination",
-    "maxTrainingRows", "trainRows", "testRows", "finalLoss", "finalValidationLoss", "message",
+    "maxTrainingRows", "trainRows", "testRows", "finalLoss", "finalValidationLoss",
+    "globalTrainErrorMean", "globalTrainErrorStd", "globalTrainErrorP90", "globalTrainErrorP95",
+    "globalTrainErrorP97", "globalTrainErrorP99", "globalTrainErrorP995", "globalTrainErrorP999",
+    "globalSuspectThreshold", "globalFailedThreshold", "calibrationMode", "message",
 ]
 
 AUTOENCODER_HISTORY_FIELDS = ["epoch", "loss", "validationLoss"]
@@ -215,6 +223,152 @@ def normalized_feature_matrix(feature_rows: Sequence[Dict[str, object]], mean_va
     return (matrix - mean_values) / std_values, mean_values, std_values
 
 
+def clamp_quantile(value: float, default: float) -> float:
+    try:
+        quantile = float(value)
+    except (TypeError, ValueError):
+        quantile = default
+    return max(0.0, min(0.9999, quantile))
+
+
+def quantile(values: Sequence[float], q: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = clamp_quantile(q, 0.99) * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return ordered[lower] + ((ordered[upper] - ordered[lower]) * fraction)
+
+
+def enforce_failed_threshold(suspect_threshold: float, failed_threshold: float) -> float:
+    minimum_failed = suspect_threshold * 1.5 if suspect_threshold > 0 else suspect_threshold + 0.001
+    return max(failed_threshold, minimum_failed)
+
+
+def calibration_quantiles(config: AutoencoderConfig) -> Tuple[float, float]:
+    suspect_quantile = max(clamp_quantile(config.suspect_quantile, 0.99), 1.0 - min(max(config.contamination, 0.0), 0.01))
+    failed_quantile = max(clamp_quantile(config.failed_quantile, 0.999), suspect_quantile)
+    return suspect_quantile, failed_quantile
+
+
+def threshold_pair(errors: Sequence[float], suspect_quantile: float, failed_quantile: float) -> Tuple[float, float]:
+    suspect_threshold = quantile(errors, suspect_quantile)
+    failed_threshold = enforce_failed_threshold(suspect_threshold, quantile(errors, failed_quantile))
+    return suspect_threshold, failed_threshold
+
+
+def group_errors(
+    rows: Sequence[Dict[str, object]],
+    errors: Sequence[float],
+    fields: Tuple[str, ...],
+) -> Dict[Tuple[str, ...], List[float]]:
+    grouped: Dict[Tuple[str, ...], List[float]] = defaultdict(list)
+    for row, error in zip(rows, errors):
+        grouped[tuple(str(row.get(field, "")) for field in fields)].append(float(error))
+    return grouped
+
+
+def train_error_diagnostics(train_errors: Sequence[float], suspect_threshold: float, failed_threshold: float, mode: str) -> Dict[str, object]:
+    values = [float(error) for error in train_errors]
+    return {
+        "globalTrainErrorMean": f"{mean(values):.10f}" if values else "",
+        "globalTrainErrorStd": f"{pstdev(values):.10f}" if len(values) > 1 else "0.0000000000",
+        "globalTrainErrorP90": f"{quantile(values, 0.90):.10f}" if values else "",
+        "globalTrainErrorP95": f"{quantile(values, 0.95):.10f}" if values else "",
+        "globalTrainErrorP97": f"{quantile(values, 0.97):.10f}" if values else "",
+        "globalTrainErrorP99": f"{quantile(values, 0.99):.10f}" if values else "",
+        "globalTrainErrorP995": f"{quantile(values, 0.995):.10f}" if values else "",
+        "globalTrainErrorP999": f"{quantile(values, 0.999):.10f}" if values else "",
+        "globalSuspectThreshold": f"{suspect_threshold:.10f}",
+        "globalFailedThreshold": f"{failed_threshold:.10f}",
+        "calibrationMode": mode,
+    }
+
+
+def autoencoder_thresholds(
+    train_rows: Sequence[Dict[str, object]],
+    train_errors: Sequence[float],
+    test_row: Dict[str, object],
+    config: AutoencoderConfig,
+) -> Tuple[float, float, str]:
+    suspect_quantile, failed_quantile = calibration_quantiles(config)
+    global_suspect, global_failed = threshold_pair(train_errors, suspect_quantile, failed_quantile)
+    mode = config.calibration
+    if mode == "global_quantile":
+        return global_suspect, global_failed, "global_quantile"
+
+    station_element_groups = group_errors(train_rows, train_errors, ("stationId", "elementCode"))
+    element_groups = group_errors(train_rows, train_errors, ("elementCode",))
+    station_element_key = (str(test_row.get("stationId", "")), str(test_row.get("elementCode", "")))
+    element_key = (str(test_row.get("elementCode", "")),)
+
+    if mode == "station_element_quantile":
+        station_element_errors = station_element_groups.get(station_element_key, [])
+        if len(station_element_errors) >= max(1, int(config.min_group_rows)):
+            suspect, failed = threshold_pair(station_element_errors, suspect_quantile, failed_quantile)
+            return suspect, failed, "station_element_quantile"
+
+    if mode in {"station_element_quantile", "element_quantile"}:
+        element_errors = element_groups.get(element_key, [])
+        if len(element_errors) >= max(1, int(config.min_element_rows)):
+            suspect, failed = threshold_pair(element_errors, suspect_quantile, failed_quantile)
+            return suspect, failed, "element_quantile"
+
+    return global_suspect, global_failed, "global_quantile"
+
+
+def build_autoencoder_calibration(
+    train_rows: Sequence[Dict[str, object]],
+    train_errors: Sequence[float],
+    config: AutoencoderConfig,
+) -> Dict[str, object]:
+    suspect_quantile, failed_quantile = calibration_quantiles(config)
+    global_thresholds = threshold_pair(train_errors, suspect_quantile, failed_quantile)
+    calibration: Dict[str, object] = {
+        "globalThresholds": global_thresholds,
+        "stationElementThresholds": {},
+        "elementThresholds": {},
+    }
+    station_element_groups = group_errors(train_rows, train_errors, ("stationId", "elementCode"))
+    element_groups = group_errors(train_rows, train_errors, ("elementCode",))
+    calibration["stationElementThresholds"] = {
+        key: threshold_pair(errors, suspect_quantile, failed_quantile)
+        for key, errors in station_element_groups.items()
+        if len(errors) >= max(1, int(config.min_group_rows))
+    }
+    calibration["elementThresholds"] = {
+        key: threshold_pair(errors, suspect_quantile, failed_quantile)
+        for key, errors in element_groups.items()
+        if len(errors) >= max(1, int(config.min_element_rows))
+    }
+    return calibration
+
+
+def select_autoencoder_thresholds(
+    test_row: Dict[str, object],
+    config: AutoencoderConfig,
+    calibration: Dict[str, object],
+) -> Tuple[float, float, str]:
+    global_thresholds = calibration["globalThresholds"]
+    mode = config.calibration
+    if mode == "global_quantile":
+        return (*global_thresholds, "global_quantile")
+
+    station_element_key = (str(test_row.get("stationId", "")), str(test_row.get("elementCode", "")))
+    element_key = (str(test_row.get("elementCode", "")),)
+    station_element_thresholds = calibration["stationElementThresholds"]
+    element_thresholds = calibration["elementThresholds"]
+    if mode == "station_element_quantile" and station_element_key in station_element_thresholds:
+        return (*station_element_thresholds[station_element_key], "station_element_quantile")
+    if mode in {"station_element_quantile", "element_quantile"} and element_key in element_thresholds:
+        return (*element_thresholds[element_key], "element_quantile")
+    return (*global_thresholds, "global_quantile")
+
+
 def autoencoder_predictions(
     train_rows: Sequence[Dict[str, object]],
     test_rows: Sequence[Dict[str, object]],
@@ -240,6 +394,17 @@ def autoencoder_predictions(
         "testRows": len(test_rows),
         "finalLoss": "",
         "finalValidationLoss": "",
+        "globalTrainErrorMean": "",
+        "globalTrainErrorStd": "",
+        "globalTrainErrorP90": "",
+        "globalTrainErrorP95": "",
+        "globalTrainErrorP97": "",
+        "globalTrainErrorP99": "",
+        "globalTrainErrorP995": "",
+        "globalTrainErrorP999": "",
+        "globalSuspectThreshold": "",
+        "globalFailedThreshold": "",
+        "calibrationMode": config.calibration,
     }
     if not detection["tensorflowInstalled"]:
         return [], [], [{**base_status, "status": "unavailable", "message": "TensorFlow is not installed; autoencoder predictions were skipped."}]
@@ -251,6 +416,7 @@ def autoencoder_predictions(
 
     training_rows = list(train_rows)[: max(1, int(config.max_training_rows))]
     x_train, mean_values, std_values = normalized_feature_matrix(training_rows)
+    x_calibration, _, _ = normalized_feature_matrix(train_rows, mean_values, std_values)
     x_test, _, _ = normalized_feature_matrix(test_rows, mean_values, std_values)
     input_dim = x_train.shape[1]
     bottleneck_dim = max(2, input_dim // 3)
@@ -286,18 +452,17 @@ def autoencoder_predictions(
         shuffle=False,
     )
 
-    train_reconstructions = model.predict(x_train, verbose=0)
+    train_reconstructions = model.predict(x_calibration, verbose=0)
     test_reconstructions = model.predict(x_test, verbose=0)
-    train_errors = np.mean(np.square(x_train - train_reconstructions), axis=1)
+    train_errors = np.mean(np.square(x_calibration - train_reconstructions), axis=1)
     test_errors = np.mean(np.square(x_test - test_reconstructions), axis=1)
-    suspect_threshold = float(np.quantile(train_errors, max(0.0, min(0.999, 1.0 - config.contamination))))
-    failed_threshold = float(np.quantile(train_errors, max(0.0, min(0.999, 1.0 - (config.contamination / 5.0)))))
-    if failed_threshold <= suspect_threshold:
-        failed_threshold = suspect_threshold * 1.5 if suspect_threshold > 0 else suspect_threshold + 0.001
+    calibration = build_autoencoder_calibration(train_rows, [float(error) for error in train_errors], config)
+    global_suspect_threshold, global_failed_threshold = calibration["globalThresholds"]
 
     predictions: List[Dict[str, object]] = []
     for row, error in zip(test_rows, test_errors):
         score = float(error)
+        suspect_threshold, failed_threshold, threshold_mode = select_autoencoder_thresholds(row, config, calibration)
         if score >= failed_threshold:
             outcome, severity = "FAILED", "HIGH"
         elif score >= suspect_threshold:
@@ -309,7 +474,8 @@ def autoencoder_predictions(
         confidence = f"{min(0.99, max(0.50, 0.50 + (ratio * 0.35))):.2f}"
         explanation = (
             f"Autoencoder reconstruction error is {score:.6f}; suspect threshold is "
-            f"{suspect_threshold:.6f} and failed threshold is {failed_threshold:.6f}."
+            f"{suspect_threshold:.6f} and failed threshold is {failed_threshold:.6f} "
+            f"using {threshold_mode} calibration."
         )
         predictions.append(build_prediction(row, "Autoencoder", score, outcome, severity, confidence, explanation))
 
@@ -328,6 +494,12 @@ def autoencoder_predictions(
         "status": "trained",
         "finalLoss": f"{losses[-1]:.10f}" if losses else "",
         "finalValidationLoss": f"{val_losses[-1]:.10f}" if val_losses else "",
+        **train_error_diagnostics(
+            [float(error) for error in train_errors],
+            float(global_suspect_threshold),
+            float(global_failed_threshold),
+            config.calibration,
+        ),
         "message": "TensorFlow/Keras autoencoder trained on normalized LMS numeric features using CPU/GPU devices reported by TensorFlow.",
     }
     return predictions, history_rows, [status]

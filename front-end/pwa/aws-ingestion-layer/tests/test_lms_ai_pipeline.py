@@ -11,11 +11,15 @@ from lms_ai_pipeline.io import read_csv
 from lms_ai_pipeline.ensemble import ensemble_predictions
 from lms_ai_pipeline.models import (
     AutoencoderConfig,
+    AUTOENCODER_STATUS_FIELDS,
     PREDICTION_FIELDS,
+    autoencoder_thresholds,
     autoencoder_predictions,
     build_prediction,
     detect_tensorflow_keras,
     random_forest_status_rows,
+    threshold_pair,
+    train_error_diagnostics,
     zscore_predictions,
 )
 from lms_ai_pipeline import inspect as inspect_module
@@ -315,12 +319,39 @@ def test_lms_autoencoder_unavailable_path(monkeypatch):
     assert history == []
     assert status[0]["status"] == "unavailable"
     assert status[0]["epochs"] == 3
+    for field in [
+        "globalTrainErrorMean",
+        "globalTrainErrorStd",
+        "globalTrainErrorP90",
+        "globalTrainErrorP95",
+        "globalTrainErrorP97",
+        "globalTrainErrorP99",
+        "globalTrainErrorP995",
+        "globalTrainErrorP999",
+        "globalSuspectThreshold",
+        "globalFailedThreshold",
+        "calibrationMode",
+    ]:
+        assert field in status[0]
+        assert field in AUTOENCODER_STATUS_FIELDS
 
 
 def test_lms_epoch_config_parsing(monkeypatch):
     from lms_ai_pipeline import run_all as run_all_module
 
-    monkeypatch.setattr(sys, "argv", ["run_all", "--epochs", "10", "--batch-size", "128", "--validation-split", "0.1", "--patience", "2", "--contamination", "0.07", "--max-training-rows", "100"])
+    monkeypatch.setattr(sys, "argv", [
+        "run_all",
+        "--epochs", "10",
+        "--batch-size", "128",
+        "--validation-split", "0.1",
+        "--patience", "2",
+        "--contamination", "0.07",
+        "--max-training-rows", "100",
+        "--autoencoder-calibration", "element_quantile",
+        "--autoencoder-suspect-quantile", "0.98",
+        "--autoencoder-failed-quantile", "0.997",
+        "--autoencoder-min-group-rows", "25",
+    ])
     args = run_all_module.parse_args()
 
     assert args.epochs == 10
@@ -329,6 +360,10 @@ def test_lms_epoch_config_parsing(monkeypatch):
     assert args.patience == 2
     assert args.contamination == 0.07
     assert args.max_training_rows == 100
+    assert args.autoencoder_calibration == "element_quantile"
+    assert args.autoencoder_suspect_quantile == 0.98
+    assert args.autoencoder_failed_quantile == 0.997
+    assert args.autoencoder_min_group_rows == 25
 
 
 def test_lms_autoencoder_prediction_schema():
@@ -337,6 +372,53 @@ def test_lms_autoencoder_prediction_schema():
     assert list(row.keys()) == PREDICTION_FIELDS
     assert row["modelName"] == "Autoencoder"
     assert row["anomalyScore"] == "0.123000"
+
+
+def test_lms_autoencoder_station_element_calibration_uses_group_threshold():
+    train_rows = [{**feature_row((index % 28) + 1), "stationId": "LESBUT01", "elementCode": "rain"} for index in range(6)]
+    train_rows += [{**feature_row((index % 28) + 1), "stationId": "OTHER", "elementCode": "rain"} for index in range(6)]
+    train_errors = [1, 1, 1, 1, 1, 10, 50, 50, 50, 50, 50, 100]
+    config = AutoencoderConfig(min_group_rows=5, min_element_rows=100, suspect_quantile=0.8, failed_quantile=0.9, contamination=0.01)
+
+    suspect, failed, mode = autoencoder_thresholds(train_rows, train_errors, {"stationId": "LESBUT01", "elementCode": "rain"}, config)
+
+    assert mode == "station_element_quantile"
+    assert suspect < 50
+    assert failed > suspect
+
+
+def test_lms_autoencoder_element_calibration_fallback_when_station_element_small():
+    train_rows = [{**feature_row((index % 28) + 1), "stationId": f"STATION{index}", "elementCode": "rain"} for index in range(6)]
+    train_rows += [{**feature_row((index % 28) + 1), "stationId": "OTHER", "elementCode": "tmax"} for index in range(6)]
+    train_errors = [1, 1, 1, 1, 1, 10, 80, 80, 80, 80, 80, 120]
+    config = AutoencoderConfig(min_group_rows=5, min_element_rows=5, suspect_quantile=0.8, failed_quantile=0.9, contamination=0.01)
+
+    suspect, failed, mode = autoencoder_thresholds(train_rows, train_errors, {"stationId": "LESBUT01", "elementCode": "rain"}, config)
+
+    assert mode == "element_quantile"
+    assert suspect < 80
+    assert failed > suspect
+
+
+def test_lms_autoencoder_global_calibration_fallback_when_element_small():
+    train_rows = [{**feature_row((index % 28) + 1), "stationId": f"STATION{index}", "elementCode": "rain"} for index in range(4)]
+    train_rows += [{**feature_row((index % 28) + 1), "stationId": "OTHER", "elementCode": "tmax"} for index in range(6)]
+    train_errors = [1, 1, 1, 10, 90, 90, 90, 90, 90, 120]
+    config = AutoencoderConfig(min_group_rows=5, min_element_rows=5, suspect_quantile=0.8, failed_quantile=0.9, contamination=0.01)
+
+    suspect, failed, mode = autoencoder_thresholds(train_rows, train_errors, {"stationId": "LESBUT01", "elementCode": "rain"}, config)
+
+    assert mode == "global_quantile"
+    assert suspect > 10
+    assert failed > suspect
+
+
+def test_lms_autoencoder_failed_threshold_is_stricter_than_suspect():
+    suspect, failed = threshold_pair([0.1, 0.2, 0.3, 0.4], 0.5, 0.5)
+    diagnostics = train_error_diagnostics([0.1, 0.2, 0.3, 0.4], suspect, failed, "global_quantile")
+
+    assert failed > suspect
+    assert float(diagnostics["globalFailedThreshold"]) > float(diagnostics["globalSuspectThreshold"])
 
 
 def test_lms_report_summary_generation(tmp_path: Path, monkeypatch):
@@ -362,10 +444,15 @@ def test_lms_report_summary_generation(tmp_path: Path, monkeypatch):
     (tmp_path / "test.csv").write_text("stationId\nLESBUT01\n", encoding="utf-8")
     (tmp_path / "metadata.csv").write_text("modelName,status,message\nAutoencoder,trained,ok\n", encoding="utf-8")
     (tmp_path / "rf.csv").write_text("modelName,status,reason,requiredInput\nRandom Forest,not_trained,no labels,labels\n", encoding="utf-8")
-    (tmp_path / "ae_status.csv").write_text("modelName,status,epochs,batchSize,validationSplit,patience,contamination\nAutoencoder,trained,10,128,0.2,5,0.05\n", encoding="utf-8")
+    (tmp_path / "ae_status.csv").write_text(
+        "modelName,status,epochs,batchSize,validationSplit,patience,contamination,calibrationMode,globalSuspectThreshold,globalFailedThreshold\n"
+        "Autoencoder,trained,10,128,0.2,5,0.05,station_element_quantile,1.0,2.0\n",
+        encoding="utf-8",
+    )
     (tmp_path / "ae_history.csv").write_text("epoch,loss,validationLoss\n1,0.2,0.3\n2,0.1,0.2\n", encoding="utf-8")
     for name in ["lms_zscore_predictions.csv", "lms_isolation_forest_predictions.csv", "lms_one_class_svm_predictions.csv", "lms_autoencoder_predictions.csv"]:
         (tmp_path / name).write_text("stationId,outcome,anomalyScore\nLESBUT01,NORMAL,0.1\n", encoding="utf-8")
+    (tmp_path / "lms_autoencoder_predictions.csv").write_text("stationId,outcome,anomalyScore\nLESBUT01,FAILED,5.0\n", encoding="utf-8")
     (tmp_path / "ensemble.csv").write_text("stationId,observationDatetime,elementCode,value,finalDecision,outcome,severity,modelAgreementCount,anomalyScore\nLESBUT01,2020-01-01,rain,1,FAILED,FAILED,HIGH,2,5\n", encoding="utf-8")
 
     payload = reporting.generate_model_evaluation_report()
@@ -374,6 +461,12 @@ def test_lms_report_summary_generation(tmp_path: Path, monkeypatch):
     assert files["MODEL_EVALUATION_SUMMARY_CSV"].exists()
     assert files["MODEL_EVALUATION_SUMMARY_MD"].exists()
     assert files["MODEL_EVALUATION_SUMMARY_JSON"].exists()
+    assert payload["autoencoderCalibrationMode"] == "station_element_quantile"
+    assert payload["autoencoderSuspectThreshold"] == "1.0"
+    assert payload["autoencoderFailedThreshold"] == "2.0"
+    assert payload["anomalyRatePerModel"]["Autoencoder"] == 1.0
+    assert any("threshold calibration requires review" in warning for warning in payload["calibrationWarnings"])
+    assert "## Calibration Warnings" in files["MODEL_EVALUATION_SUMMARY_MD"].read_text(encoding="utf-8")
 
 
 def test_lms_visualisation_output_paths(monkeypatch, tmp_path: Path):

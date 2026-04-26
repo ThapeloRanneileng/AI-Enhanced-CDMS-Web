@@ -16,6 +16,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--patience", type=int, default=5)
     parser.add_argument("--contamination", type=float, default=0.05)
     parser.add_argument("--max-training-rows", type=int, default=50000)
+    parser.add_argument(
+        "--autoencoder-calibration",
+        choices=["global_quantile", "station_element_quantile", "element_quantile"],
+        default="station_element_quantile",
+    )
+    parser.add_argument("--autoencoder-suspect-quantile", type=float, default=0.99)
+    parser.add_argument("--autoencoder-failed-quantile", type=float, default=0.999)
+    parser.add_argument("--autoencoder-min-group-rows", type=int, default=500)
+    parser.add_argument("--autoencoder-min-element-rows", type=int, default=2000)
     return parser.parse_args()
 
 
@@ -28,6 +37,11 @@ def main() -> None:
         patience=args.patience,
         contamination=args.contamination,
         max_training_rows=args.max_training_rows,
+        calibration=args.autoencoder_calibration,
+        suspect_quantile=args.autoencoder_suspect_quantile,
+        failed_quantile=args.autoencoder_failed_quantile,
+        min_group_rows=args.autoencoder_min_group_rows,
+        min_element_rows=args.autoencoder_min_element_rows,
     )
     count = run_all(config)
     print(f"LMS AI pipeline complete. Prediction rows: {count}")
