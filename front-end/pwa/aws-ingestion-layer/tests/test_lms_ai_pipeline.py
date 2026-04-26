@@ -411,6 +411,158 @@ def test_lms_genai_template_fallback(tmp_path: Path, monkeypatch):
     assert "template" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
 
+def write_genai_fixture(tmp_path: Path, count: int = 1) -> None:
+    rows = [
+        "stationId,observationDatetime,elementCode,finalDecision,outcome,severity,confidence,modelAgreementCount,anomalyScore,explanation"
+    ]
+    for index in range(count):
+        rows.append(
+            f"LES{index:05d},2020-01-{(index % 28) + 1:02d},rain,SUSPECT,SUSPECT,MEDIUM,0.7,1,{100 - index},template explanation {index}"
+        )
+    (tmp_path / "ensemble.csv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (tmp_path / "summary.json").write_text('{"totalNormalizedRows": 1000, "anomalyRows": 25}', encoding="utf-8")
+
+
+def patch_genai_paths(genai, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(genai, "ENSEMBLE_PREDICTIONS_FILE", tmp_path / "ensemble.csv")
+    monkeypatch.setattr(genai, "MODEL_EVALUATION_SUMMARY_JSON", tmp_path / "summary.json")
+    monkeypatch.setattr(genai, "GENAI_MODEL_SUMMARY_FILE", tmp_path / "summary.md")
+    monkeypatch.setattr(genai, "GENAI_REVIEWER_EXPLANATIONS_FILE", tmp_path / "explanations.csv")
+
+
+def clear_genai_keys(monkeypatch) -> None:
+    for key in ["GEMINI_API_KEY", "GEMINI_MODEL", "GROQ_API_KEY", "GROQ_MODEL"]:
+        monkeypatch.delenv(key, raising=False)
+
+
+def test_lms_genai_gemini_missing_key_falls_back_to_groq(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path)
+
+    def fake_post_json(url, headers, payload, timeout=30):
+        assert url == genai.GROQ_CHAT_COMPLETIONS_URL
+        return {"choices": [{"message": {"content": "groq generated text"}}]}
+
+    monkeypatch.setattr(genai, "_post_json", fake_post_json)
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "groq"
+    assert "provider=groq" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "groq,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
+
+
+def test_lms_genai_gemini_missing_keys_falls_back_to_template(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path)
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "template"
+    assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
+
+
+def test_lms_genai_gemini_api_failure_falls_back_safely(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path)
+    monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("failed")))
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "gemini"
+    assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
+
+
+def test_lms_genai_gemini_empty_candidates_falls_back_safely(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-key")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path)
+    monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: {"promptFeedback": {"blockReason": "SAFETY"}})
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "gemini"
+    assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
+
+
+def test_lms_genai_groq_api_failure_falls_back_safely(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path)
+    monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("failed")))
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "groq"
+    assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
+
+
+def test_lms_genai_external_provider_limits_reviewer_rows(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path, count=25)
+    calls = []
+
+    def fake_post_json(url, headers, payload, timeout=30):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": f"external text {len(calls)}"}}]}
+
+    monkeypatch.setattr(genai, "_post_json", fake_post_json)
+
+    genai.generate_genai_outputs()
+
+    with (tmp_path / "explanations.csv").open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(calls) == genai.EXTERNAL_REVIEWER_EXPLANATION_LIMIT + 1
+    assert sum(row["provider"] == "groq" for row in rows) == genai.EXTERNAL_REVIEWER_EXPLANATION_LIMIT
+    assert sum(row["provider"] == "template" for row in rows) == 5
+
+
+def test_lms_genai_template_provider_uses_no_network(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    clear_genai_keys(monkeypatch)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "template")
+    patch_genai_paths(genai, tmp_path, monkeypatch)
+    write_genai_fixture(tmp_path)
+    monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: pytest.fail("template provider must not call network"))
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "template"
+    assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+
+
 def test_lms_ensemble_includes_autoencoder_when_available():
     base = feature_row(1)
     model_rows = [
