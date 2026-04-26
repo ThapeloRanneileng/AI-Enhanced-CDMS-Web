@@ -1,3 +1,16 @@
+<section class="cdms-page-shell">
+    <div class="cdms-page-header">
+        <div>
+            <span class="eyebrow">AI-Enhanced CDMS</span>
+            <h2>QC Review Workspace</h2>
+            <p>Review rule-based QC, AI anomaly evidence, and final reviewer decisions in one unified premium workspace.</p>
+        </div>
+        <div class="cdms-header-meta">
+            <span class="cdms-header-chip">{{ unifiedReviewCount }} records</span>
+            <span class="cdms-header-chip">{{ completedDecisionCount }} reviewed</span>
+        </div>
+    </div>
+
 <div class="card border-0">
     <div class="card-body p-0">
         <app-query-selection #querySelection [parentComponentName]="componentName"
@@ -40,7 +53,7 @@
                 </div>
             </div>
 
-            <div class="qc-workspace-grid">
+            <div class="qc-workspace-grid" [class.qc-workspace-grid--single-pane]="!hasSelection">
                 <div class="card border-0 shadow-sm">
                     <div class="card-header bg-transparent border-0 pb-0">
                         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -79,6 +92,10 @@
                         </div>
                         <div class="small text-muted mb-2">
                             {{ unifiedReviewCount }} review record{{ unifiedReviewCount === 1 ? '' : 's' }} loaded.
+                            <span *ngIf="loadedObservationCount > 0">
+                                {{ loadedObservationCount }} observation{{ loadedObservationCount === 1 ? '' : 's' }} matched;
+                                {{ loadedRuleFailedObservationCount }} failed rule-based QC.
+                            </span>
                         </div>
                         <div class="app-table-container qc-table-wrap">
                             <table class="table table-hover table-sm align-middle">
@@ -136,7 +153,7 @@
                                             <div class="qc-empty-state">
                                                 <div class="qc-empty-icon">Q</div>
                                                 <div class="fw-semibold">No QC review records found for the selected filters.</div>
-                                                <div class="small text-muted">Try widening the date range or removing some filters.</div>
+                                                <div class="small text-muted">{{ emptyWorkspaceMessage }}</div>
                                             </div>
                                         </td>
                                     </tr>
@@ -279,26 +296,33 @@
 
                         <div class="mb-3">
                             <div class="small text-muted text-uppercase fw-semibold">Reviewer Controls</div>
+                            <label class="form-label small text-muted mt-2 mb-1">Corrected Value</label>
+                            <input type="number" class="form-control"
+                                [(ngModel)]="correctedValueDraft"
+                                placeholder="Required only when overriding the AWS value." />
                             <textarea class="form-control mt-2" rows="5" [(ngModel)]="reviewerNotesDraft"
                                 placeholder="Document review reasoning, override evidence, or escalation notes."></textarea>
                             <div class="d-flex justify-content-between align-items-center mt-2">
                                 <div class="small text-muted">
                                     {{ item.reviewedByEmail ? item.reviewedByEmail + ' • ' + formatReviewTimestamp(item) : 'Not reviewed yet' }}
                                 </div>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" (click)="onSaveReviewerNotes()">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" [disabled]="selectedDecisionSubmitting" (click)="onSaveReviewerNotes()">
                                     Save Notes
                                 </button>
+                            </div>
+                            <div class="small text-danger mt-2" *ngIf="item.promotionError">
+                                Final observation promotion failed: {{ item.promotionError }}
                             </div>
                         </div>
 
                         <div class="d-flex flex-wrap gap-2">
-                            <button type="button" class="btn btn-sm btn-outline-success" (click)="onSelectDecision('approved')">
+                            <button type="button" class="btn btn-sm btn-outline-success" [disabled]="selectedDecisionSubmitting" (click)="onSelectDecision('approved')">
                                 Approve
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-warning" (click)="onSelectDecision('overridden')">
+                            <button type="button" class="btn btn-sm btn-outline-warning" [disabled]="selectedDecisionSubmitting" (click)="onSelectDecision('overridden')">
                                 Override
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-danger" (click)="onSelectDecision('escalated')">
+                            <button type="button" class="btn btn-sm btn-outline-danger" [disabled]="selectedDecisionSubmitting" (click)="onSelectDecision('escalated')">
                                 Escalate
                             </button>
                         </div>
@@ -308,3 +332,4 @@
         </div>
     </div>
 </div>
+</section>

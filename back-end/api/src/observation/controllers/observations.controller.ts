@@ -20,6 +20,7 @@ import { DataEntryAndCorrectionCheckService } from '../services/data-entry-corec
 import { DataFlowQueryDto } from '../dtos/data-flow-query.dto';
 import { QCStatusEnum } from '../enums/qc-status.enum';
 import { DataAvailabilityDetailsQueryDto } from '../dtos/data-availability-details-query.dto';
+import { ImportObservationDataDto, ObservationDataImportResultDto } from '../dtos/import-observation-data.dto';
 
 @Controller('observations')
 export class ObservationsController {
@@ -128,6 +129,13 @@ export class ObservationsController {
 
     // TODO. Just return success - http 200
     return { message: "success" };
+  }
+
+  @Post('manual-import')
+  async manualImportObservationData(
+    @Req() request: Request,
+    @Body() importDto: ImportObservationDataDto): Promise<ObservationDataImportResultDto> {
+    return this.observationsService.importObservationDataRows(importDto.rows || [], AuthUtil.getLoggedInUser(request));
   }
 
   //-------------------------------------------------------------------------------

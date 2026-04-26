@@ -5,6 +5,7 @@ import { ObservationEntity } from '../entities/observation.entity';
 import { ViewObservationQueryDTO } from '../dtos/view-observation-query.dto';
 import { DateUtils } from 'src/shared/utils/date.utils';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { buildQCObservationQueryFilter } from './qc-query-filter.util';
 
 @Injectable()
 export class QCTestAssessmentsService {
@@ -19,7 +20,7 @@ export class QCTestAssessmentsService {
             throw new BadRequestException("You must specify page and page size. Page size must be less than 1000")
         }
 
-        const whereExpression = this.getQueryFilter(selectObsevationDto);
+        const whereExpression = buildQCObservationQueryFilter(selectObsevationDto);
 
         const query = `
           SELECT station_id, element_id, level, date_time, interval, COUNT(*) AS duplicates
@@ -54,7 +55,7 @@ export class QCTestAssessmentsService {
     }
 
     public async countSameObsWithDiffSources(selectObsevationDto: ViewObservationQueryDTO): Promise<number> {
-        const whereExpression = this.getQueryFilter(selectObsevationDto);
+        const whereExpression = buildQCObservationQueryFilter(selectObsevationDto);
         const query = `
         SELECT COUNT(*) AS count_num
         FROM 
@@ -83,7 +84,7 @@ export class QCTestAssessmentsService {
             throw new BadRequestException('Date range required');
         }
 
-        let whereExpression: string = this.getQueryFilter(queryDto);
+        let whereExpression: string = buildQCObservationQueryFilter(queryDto);
 
         if (queryDto.qcStatus) {
             whereExpression = whereExpression + ` AND qc_status = '${queryDto.qcStatus}'`;
@@ -105,59 +106,5 @@ export class QCTestAssessmentsService {
 
         return { message: 'success', qcFails: qcFails };
     }
-
-    private getQueryFilter(queryDto: ViewObservationQueryDTO): string {
-        let where: string = '';
-        if (queryDto.stationIds && queryDto.stationIds.length > 0) {
-            where = where + ` station_id IN (${queryDto.stationIds.map(id => `'${id}'`).join(',')}) AND`;
-        }
-
-        if (queryDto.elementIds && queryDto.elementIds.length > 0) {
-            where = where + ` element_id IN (${queryDto.elementIds.join(',')}) AND`;
-        }
-
-        if (queryDto.level !== undefined) {
-            where = `${where} level = ${queryDto.level} AND`;
-        }
-
-        if (queryDto.intervals) {
-            where = `${where} interval = ${queryDto.intervals} AND`;
-        }
-
-        const dateOperator: string | null = this.getQueryDateFilter(queryDto);
-        if (dateOperator) {
-            where = `${where} ( ${dateOperator} ) AND`;
-        }
-
-        // Ignore deleted values by default.
-        return `${where} deleted = FALSE`;
-    }
-
-    private getQueryDateFilter(queryDto: ViewObservationQueryDTO): string | null {
-        let dateOperator: string | null = null;
-        const dateColToUse: string = queryDto.useEntryDate ? 'entry_date_time' : 'date_time';
-        const strFromDate: string = queryDto.fromDate ? queryDto.fromDate.replace('T', ' ').replace('Z', '') : '';
-        const strToDate: string = queryDto.toDate ? queryDto.toDate.replace('T', ' ').replace('Z', '') : '';
-
-        if (strFromDate && strToDate) {
-            if (strFromDate === strToDate) {
-                // Equal
-                dateOperator = `${dateColToUse} = '${strFromDate}' `;
-            } else {
-                // Between
-                dateOperator = `${dateColToUse} BETWEEN '${strFromDate}' AND '${strToDate}'`;
-            }
-
-        } else if (strFromDate) {
-            // MoreThanOrEqual
-            dateOperator = `${dateColToUse} >= '${strFromDate}' `;
-        } else if (strToDate) {
-            // LessThanOrEqual
-            dateOperator = `${dateColToUse} <= '${strToDate}' `;
-        }
-
-        return dateOperator;
-    }
-
 
 }

@@ -17,15 +17,18 @@ import { ViewObservationAnomalyAssessmentModel } from '../models/view-observatio
 import { ObservationAnomalyAssessmentsService } from '../services/observation-anomaly-assessments.service';
 import { StringUtils } from 'src/app/shared/utils/string.utils';
 import { AppAuthService } from 'src/app/app-auth.service';
-import { AppDatabase, AppComponentState, UserAppStateEnum } from 'src/app/app-database';
+import { QCReviewWorkflowService } from '../services/qc-review-workflow.service';
 
 type ReviewerDecision = 'pending' | 'approved' | 'overridden' | 'escalated';
 
 interface PersistedQCReviewDecision {
   decision: ReviewerDecision;
   notes: string;
+  correctedValue: number | null;
   reviewedAt: string;
   reviewedByEmail?: string;
+  workflowStatus: 'pending_review' | 'reviewed' | 'approved_to_final' | 'corrected_and_approved' | 'rejected_escalated';
+  promotionError: string | null;
 }
 
 interface PersistedQCReviewState {
@@ -56,8 +59,11 @@ interface QCReviewItem {
   aiExplanation: string;
   reviewerDecision: ReviewerDecision;
   reviewerNotes: string;
+  correctedValue: number | null;
   reviewedAt: string | null;
   reviewedByEmail: string | null;
+  workflowStatus: 'pending_review' | 'reviewed' | 'approved_to_final' | 'corrected_and_approved' | 'rejected_escalated';
+  promotionError: string | null;
 }
 
 @Component({
@@ -77,11 +83,17 @@ export class QCAssessmentComponent implements OnDestroy {
   private allMetadataLoaded: boolean = false;
   protected selectedReviewKey: string | null = null;
   protected reviewerNotesDraft: string = '';
+  protected correctedValueDraft: number | null = null;
   protected queueSearch: string = '';
   protected reviewDecisionFilter: 'all' | ReviewerDecision = 'all';
   protected loadingAiContext: boolean = false;
   protected currentUserEmail: string = '';
+  protected loadedObservationCount: number = 0;
+  protected loadedRuleFailedObservationCount: number = 0;
+  protected loadedAnomalyAssessmentCount: number = 0;
+  protected emptyWorkspaceMessage: string = 'Try widening the date range or removing some filters.';
   private allReviewItems: QCReviewItem[] = [];
+  private readonly submittingReviewKeys = new Set<string>();
 
   private destroy$ = new Subject<void>();
 
@@ -92,6 +104,7 @@ export class QCAssessmentComponent implements OnDestroy {
     private observationService: ObservationsService,
     private qcAssessmentsService: QCAssessmentsService,
     private observationAnomalyAssessmentsService: ObservationAnomalyAssessmentsService,
+    private qcReviewWorkflowService: QCReviewWorkflowService,
   ) {
     this.pagesDataService.setPageHeader('QC Review Workspace');
     this.pageInputDefinition.setPageSize(18);
@@ -145,8 +158,13 @@ export class QCAssessmentComponent implements OnDestroy {
 
     this.allReviewItems = [];
     this.reviewItems = [];
+    this.loadedObservationCount = 0;
+    this.loadedRuleFailedObservationCount = 0;
+    this.loadedAnomalyAssessmentCount = 0;
+    this.emptyWorkspaceMessage = 'Try widening the date range or removing some filters.';
     this.selectedReviewKey = null;
     this.reviewerNotesDraft = '';
+    this.correctedValueDraft = null;
     this.pageInputDefinition.onFirst();
     this.pageInputDefinition.setTotalRowCount(0);
     this.enableQueryButton = false;
@@ -237,6 +255,7 @@ export class QCAssessmentComponent implements OnDestroy {
     this.reviewItems = [];
     this.selectedReviewKey = null;
     this.reviewerNotesDraft = '';
+    this.correctedValueDraft = null;
     this.queueSearch = '';
     this.reviewDecisionFilter = 'all';
     this.pageInputDefinition.onFirst();
@@ -251,25 +270,52 @@ export class QCAssessmentComponent implements OnDestroy {
 
     const reviewItem = this.selectedReviewItem;
     this.reviewerNotesDraft = reviewItem?.reviewerNotes ?? '';
+    this.correctedValueDraft = reviewItem?.correctedValue ?? null;
   }
 
   protected async onSelectDecision(decision: ReviewerDecision): Promise<void> {
     const selectedReviewItem = this.selectedReviewItem;
-    if (!selectedReviewItem) {
+    if (!selectedReviewItem || decision === 'pending') {
       return;
     }
 
-    selectedReviewItem.reviewerDecision = decision;
-    selectedReviewItem.reviewerNotes = this.reviewerNotesDraft.trim();
-    selectedReviewItem.reviewedAt = new Date().toISOString();
-    selectedReviewItem.reviewedByEmail = this.currentUserEmail || null;
-    await this.persistReviewItem(selectedReviewItem);
-    this.updateVisibleReviewItems();
-    this.pagesDataService.showToast({
-      title: 'QC Review Workspace',
-      message: `Reviewer decision saved as ${this.formatDecision(decision)}.`,
-      type: ToastEventTypeEnum.SUCCESS
-    });
+    this.submittingReviewKeys.add(selectedReviewItem.key);
+
+    try {
+      const record = await this.qcReviewWorkflowService.submitDecision({
+        decision,
+        context: this.buildWorkflowContext(selectedReviewItem),
+        reviewerNotes: this.reviewerNotesDraft.trim(),
+        reviewerUserId: this.currentUserEmail || null,
+        correctedValue: this.correctedValueDraft,
+      });
+
+      selectedReviewItem.reviewerDecision = record.finalDecision;
+      selectedReviewItem.reviewerNotes = record.reviewerNotes;
+      selectedReviewItem.correctedValue = record.correctedValue;
+      selectedReviewItem.reviewedAt = record.reviewedAt;
+      selectedReviewItem.reviewedByEmail = record.reviewerUserId;
+      selectedReviewItem.workflowStatus = record.workflowStatus;
+      selectedReviewItem.promotionError = record.promotionError;
+      if (record.reviewedValue !== null) {
+        selectedReviewItem.observationValue = record.reviewedValue;
+      }
+
+      this.updateVisibleReviewItems();
+      this.pagesDataService.showToast({
+        title: 'QC Review Workspace',
+        message: `Reviewer decision saved as ${this.formatDecision(decision)}.`,
+        type: ToastEventTypeEnum.SUCCESS
+      });
+    } catch (err) {
+      this.pagesDataService.showToast({
+        title: 'QC Review Workspace',
+        message: `${err}`,
+        type: ToastEventTypeEnum.ERROR
+      });
+    } finally {
+      this.submittingReviewKeys.delete(selectedReviewItem.key);
+    }
   }
 
   protected async onSaveReviewerNotes(): Promise<void> {
@@ -278,19 +324,38 @@ export class QCAssessmentComponent implements OnDestroy {
       return;
     }
 
-    selectedReviewItem.reviewerNotes = this.reviewerNotesDraft.trim();
-    if (!selectedReviewItem.reviewedAt) {
-      selectedReviewItem.reviewedAt = new Date().toISOString();
-      selectedReviewItem.reviewedByEmail = this.currentUserEmail || null;
-    }
+    try {
+      const record = await this.qcReviewWorkflowService.saveDraftReview({
+        context: this.buildWorkflowContext(selectedReviewItem),
+        reviewerNotes: this.reviewerNotesDraft.trim(),
+        reviewerUserId: this.currentUserEmail || null,
+        correctedValue: this.correctedValueDraft,
+      });
 
-    await this.persistReviewItem(selectedReviewItem);
-    this.updateVisibleReviewItems();
-    this.pagesDataService.showToast({
-      title: 'QC Review Workspace',
-      message: 'Reviewer notes saved.',
-      type: ToastEventTypeEnum.SUCCESS
-    });
+      selectedReviewItem.reviewerNotes = record.reviewerNotes;
+      selectedReviewItem.correctedValue = record.correctedValue;
+      selectedReviewItem.reviewedAt = record.reviewedAt;
+      selectedReviewItem.reviewedByEmail = record.reviewerUserId;
+      selectedReviewItem.workflowStatus = record.workflowStatus;
+      selectedReviewItem.promotionError = record.promotionError;
+
+      this.updateVisibleReviewItems();
+      this.pagesDataService.showToast({
+        title: 'QC Review Workspace',
+        message: 'Reviewer notes saved.',
+        type: ToastEventTypeEnum.SUCCESS
+      });
+    } catch (err) {
+      this.pagesDataService.showToast({
+        title: 'QC Review Workspace',
+        message: `${err}`,
+        type: ToastEventTypeEnum.ERROR
+      });
+    }
+  }
+
+  protected get selectedDecisionSubmitting(): boolean {
+    return this.selectedReviewKey ? this.submittingReviewKeys.has(this.selectedReviewKey) : false;
   }
 
   protected getRowNumber(currentRowIndex: number): number {
@@ -470,8 +535,12 @@ export class QCAssessmentComponent implements OnDestroy {
         persistedReviewCount: Object.keys(reviewState.reviews).length,
       });
 
+      this.loadedObservationCount = allObservations.length;
+      this.loadedAnomalyAssessmentCount = allAnomalyAssessments.length;
+
       const observationEntries = allObservations.map(observation => this.createObservationEntry(observation));
       const observationEntryMap = new Map<string, ObservationEntry>();
+      const ruleReviewObservationKeys: string[] = [];
       for (const entry of observationEntries) {
         const observationKey = this.getObservationKey(entry);
         console.info('[QC Review Workspace] Observation review key', {
@@ -485,7 +554,12 @@ export class QCAssessmentComponent implements OnDestroy {
           observationKey,
         });
         observationEntryMap.set(observationKey, entry);
+
+        if (entry.observation.qcStatus === QCStatusEnum.FAILED || (entry.qcTestsFailed?.length ?? 0) > 0) {
+          ruleReviewObservationKeys.push(observationKey);
+        }
       }
+      this.loadedRuleFailedObservationCount = ruleReviewObservationKeys.length;
 
       const assessmentMap = new Map<string, ViewObservationAnomalyAssessmentModel>();
       for (const assessment of allAnomalyAssessments) {
@@ -524,7 +598,7 @@ export class QCAssessmentComponent implements OnDestroy {
       }
 
       const unifiedKeys = new Set<string>([
-        ...observationEntryMap.keys(),
+        ...ruleReviewObservationKeys,
         ...assessmentMap.keys(),
         ...Object.keys(reviewState.reviews),
       ]);
@@ -545,9 +619,10 @@ export class QCAssessmentComponent implements OnDestroy {
           ? entry.observation.qcStatus === QCStatusEnum.FAILED || failedChecks.length > 0
           : false;
         const aiFlagged = aiAssessment?.outcome === 'suspect' || aiAssessment?.outcome === 'failed';
+        const awsReviewRowLoaded = !!aiAssessment;
         const reviewed = !!persistedReview;
 
-        if (!(ruleFailed || aiFlagged || reviewed)) {
+        if (!(awsReviewRowLoaded || ruleFailed || aiFlagged || reviewed)) {
           droppedKeys.push(key);
           continue;
         }
@@ -564,8 +639,11 @@ export class QCAssessmentComponent implements OnDestroy {
           aiExplanation: this.getAIExplanation(aiAssessment),
           reviewerDecision: persistedReview?.decision ?? 'pending',
           reviewerNotes: persistedReview?.notes ?? '',
+          correctedValue: persistedReview?.correctedValue ?? null,
           reviewedAt: persistedReview?.reviewedAt ?? null,
           reviewedByEmail: persistedReview?.reviewedByEmail ?? null,
+          workflowStatus: persistedReview?.workflowStatus ?? 'pending_review',
+          promotionError: persistedReview?.promotionError ?? null,
         });
       }
 
@@ -582,7 +660,8 @@ export class QCAssessmentComponent implements OnDestroy {
       this.updateVisibleReviewItems();
 
       if (this.allReviewItems.length === 0) {
-        this.pagesDataService.showToast({ title: 'QC Review Workspace', message: 'No data', type: ToastEventTypeEnum.INFO });
+        this.emptyWorkspaceMessage = this.buildEmptyWorkspaceMessage();
+        this.pagesDataService.showToast({ title: 'QC Review Workspace', message: this.emptyWorkspaceMessage, type: ToastEventTypeEnum.INFO });
       }
     } catch (err) {
       this.pagesDataService.showToast({ title: 'QC Review Workspace', message: `${err}`, type: ToastEventTypeEnum.ERROR });
@@ -599,7 +678,27 @@ export class QCAssessmentComponent implements OnDestroy {
     const qcTestLogMetadata = observation.qcTestLog ?
       observation.qcTestLog
         .filter(qcLogItem => qcLogItem.qcStatus == QCStatusEnum.FAILED)
-        .map(qcLogItem => this.cachedMetadataSearchService.getQCTest(qcLogItem.qcTestId)) : [];
+        .map(qcLogItem => {
+          try {
+            return this.cachedMetadataSearchService.getQCTest(qcLogItem.qcTestId);
+          } catch {
+            return {
+              id: qcLogItem.qcTestId,
+              name: `QC Test #${qcLogItem.qcTestId}`,
+              description: 'QC test metadata is not yet available in the local cache.',
+              elementId: observation.elementId,
+              observationLevel: observation.level,
+              observationInterval: observation.interval,
+              observationIntervalName: IntervalsUtil.getIntervalName(observation.interval),
+              qcTestType: 'range_threshold' as any,
+              qcTestTypeName: 'Range Threshold',
+              parameters: {} as any,
+              formattedParameters: 'Metadata not loaded',
+              disabled: false,
+              comment: '',
+            };
+          }
+        }) : [];
 
     return {
       observation,
@@ -782,6 +881,18 @@ export class QCAssessmentComponent implements OnDestroy {
     }
   }
 
+  private buildEmptyWorkspaceMessage(): string {
+    if (this.loadedObservationCount === 0 && this.loadedAnomalyAssessmentCount === 0) {
+      return 'No observations or review-ready anomaly records matched the selected filters.';
+    }
+
+    if (this.loadedObservationCount > 0 && this.loadedRuleFailedObservationCount === 0 && this.loadedAnomalyAssessmentCount === 0) {
+      return 'Observations matched the selected filters, but none are review-ready. Passed or not-run observations do not appear here unless they have failed rule-based QC, ML suspect/failed output, or a saved reviewer decision.';
+    }
+
+    return 'No failed rule-based QC, ML suspect/failed output, or saved reviewer decision matched the selected filters.';
+  }
+
   private getAIExplanation(aiAssessment: ViewObservationAnomalyAssessmentModel | null): string {
     if (!aiAssessment) {
       return 'No ML anomaly result or generative explanation available.';
@@ -815,8 +926,21 @@ export class QCAssessmentComponent implements OnDestroy {
   }
 
   private async loadReviewState(): Promise<PersistedQCReviewState> {
-    const savedState = await AppDatabase.instance.userSettings.get(UserAppStateEnum.QC_ASSESSMENT_REVIEWS);
-    return savedState?.parameters ?? { reviews: {} };
+    const persistedReviews = await this.qcReviewWorkflowService.listDecisionRecords();
+    const reviews = persistedReviews.reduce<Record<string, PersistedQCReviewDecision>>((accumulator, record) => {
+      accumulator[record.reviewKey] = {
+        decision: record.finalDecision,
+        notes: record.reviewerNotes,
+        correctedValue: record.correctedValue,
+        reviewedAt: record.reviewedAt,
+        reviewedByEmail: record.reviewerUserId ?? undefined,
+        workflowStatus: record.workflowStatus,
+        promotionError: record.promotionError,
+      };
+      return accumulator;
+    }, {});
+
+    return { reviews };
   }
 
   private async fetchAllObservations(query: ViewObservationQueryModel): Promise<ObservationEntry['observation'][]> {
@@ -841,13 +965,20 @@ export class QCAssessmentComponent implements OnDestroy {
   }
 
   private async fetchAllAnomalyAssessments(query: ViewObservationQueryModel): Promise<ViewObservationAnomalyAssessmentModel[]> {
+    const anomalyQuery = this.getUnifiedAnomalyQueryWindow(query);
+    return this.fetchPagedAnomalyAssessments(query, anomalyQuery);
+  }
+
+  private async fetchPagedAnomalyAssessments(
+    query: ViewObservationQueryModel,
+    anomalyQuery: { fromDate?: string; toDate?: string },
+  ): Promise<ViewObservationAnomalyAssessmentModel[]> {
     const pageSize = 500;
     const results: ViewObservationAnomalyAssessmentModel[] = [];
     let page = 1;
-    const anomalyQuery = this.getUnifiedAnomalyQueryWindow(query);
 
     while (true) {
-      const batch = await firstValueFrom(this.observationAnomalyAssessmentsService.find({
+      const request = {
         stationIds: query.stationIds,
         elementIds: query.elementIds,
         intervals: query.intervals,
@@ -857,7 +988,10 @@ export class QCAssessmentComponent implements OnDestroy {
         toDate: anomalyQuery.toDate,
         page,
         pageSize,
-      }).pipe(take(1)));
+      };
+      const batch = await firstValueFrom(
+        this.observationAnomalyAssessmentsService.find(request).pipe(take(1))
+      );
       results.push(...batch);
       if (batch.length < pageSize) {
         break;
@@ -903,20 +1037,34 @@ export class QCAssessmentComponent implements OnDestroy {
     }
   }
 
-  private async persistReviewItem(reviewItem: QCReviewItem): Promise<void> {
-    const reviewState = await this.loadReviewState();
-      reviewState.reviews[reviewItem.key] = {
-      decision: reviewItem.reviewerDecision,
-      notes: reviewItem.reviewerNotes,
-      reviewedAt: reviewItem.reviewedAt ?? new Date().toISOString(),
-      reviewedByEmail: reviewItem.reviewedByEmail ?? this.currentUserEmail ?? undefined,
-    };
+  private buildWorkflowContext(reviewItem: QCReviewItem) {
+    let resolvedElementCode = reviewItem.aiAssessment?.externalReviewMetadata?.elementCode ?? '';
+    if (!resolvedElementCode) {
+      try {
+        resolvedElementCode = this.cachedMetadataSearchService.getElement(reviewItem.elementId).abbreviation;
+      } catch {
+        resolvedElementCode = `${reviewItem.elementId}`;
+      }
+    }
 
-    const state: AppComponentState = {
-      name: UserAppStateEnum.QC_ASSESSMENT_REVIEWS,
-      parameters: reviewState,
+    return {
+      reviewKey: reviewItem.key,
+      recordId: reviewItem.aiAssessment?.externalReviewMetadata?.recordId ?? reviewItem.key,
+      stationId: reviewItem.stationId,
+      observationDatetime: reviewItem.observationDatetime,
+      elementCode: resolvedElementCode,
+      elementId: reviewItem.elementId,
+      level: reviewItem.level,
+      interval: reviewItem.interval,
+      sourceId: reviewItem.sourceId,
+      sourceName: reviewItem.sourceName,
+      originalValue: reviewItem.observationValue,
+      observationFlag: reviewItem.observationFlag,
+      observationComment: reviewItem.observationComment,
+      modelVersion: reviewItem.aiAssessment?.externalReviewMetadata?.modelVersion ?? reviewItem.aiAssessment?.modelVersion ?? null,
+      engineVersion: reviewItem.aiAssessment?.externalReviewMetadata?.engineVersion ?? null,
+      runTimestamp: reviewItem.aiAssessment?.externalReviewMetadata?.runTimestamp ?? null,
+      sourceReviewRecordPresent: !!reviewItem.aiAssessment?.externalReviewMetadata,
     };
-
-    await AppDatabase.instance.userSettings.put(state);
   }
 }

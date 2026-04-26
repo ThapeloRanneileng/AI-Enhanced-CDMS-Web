@@ -16,6 +16,10 @@
   align-items: start;
 }
 
+.qc-workspace-grid--single-pane {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .qc-table-wrap {
   max-height: 70vh;
 }

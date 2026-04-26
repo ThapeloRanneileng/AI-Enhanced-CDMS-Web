@@ -19,6 +19,24 @@ export interface ObservationGenerativeExplanationModel {
     reviewerGuidance: string;
 }
 
+export interface ExternalReviewMetadataModel {
+    recordId: string;
+    stationId: string;
+    observationDatetime: string;
+    elementCode: string;
+    value: string;
+    qcStatus: string;
+    mlStatus: string;
+    finalDecision: string;
+    severity: string;
+    anomalyType: string;
+    explanationSummary: string;
+    recommendedAction: string;
+    modelVersion: string;
+    engineVersion: string;
+    runTimestamp: string;
+}
+
 export interface ViewObservationAnomalyAssessmentModel {
     id: number;
     stationId: string;
@@ -75,6 +93,7 @@ export interface ViewObservationAnomalyAssessmentModel {
         reviewerComment: string | null;
         availableActions: string[];
     } | null;
+    externalReviewMetadata?: ExternalReviewMetadataModel | null;
     createdByUserId: number | null;
     createdAt: string;
 }

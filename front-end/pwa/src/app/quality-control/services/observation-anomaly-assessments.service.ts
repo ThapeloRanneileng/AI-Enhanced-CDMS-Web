@@ -21,6 +21,8 @@ export class ObservationAnomalyAssessmentsService {
     this.endPointUrl = `${this.appConfigService.apiBaseUrl}/observation-anomaly-assessments`;
   }
 
+  // Shared review-workspace anomaly path. This reads anomaly assessments produced
+  // from the shared observation pipeline, regardless of observation source.
   public find(query: ViewObservationAnomalyAssessmentQueryModel): Observable<ViewObservationAnomalyAssessmentModel[]> {
     return this.http.get<ViewObservationAnomalyAssessmentModel[]>(
       `${this.endPointUrl}/review-workspace`,

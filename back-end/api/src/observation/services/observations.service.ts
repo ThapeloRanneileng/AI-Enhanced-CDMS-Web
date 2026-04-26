@@ -23,6 +23,18 @@ import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { DataAvailabilityDetailsQueryDto } from '../dtos/data-availability-details-query.dto';
 import { DataAvailaibilityDetailsDto } from '../dtos/data-availability-details.dto';
 import { ObservationEventUtils } from '../events/observations-saved.event';
+import { StationsService } from 'src/metadata/stations/services/stations.service';
+import { ElementsService } from 'src/metadata/elements/services/elements.service';
+import { SourceSpecificationsService } from 'src/metadata/source-specifications/services/source-specifications.service';
+import { SourceTypeEnum } from 'src/metadata/source-specifications/enums/source-type.enum';
+import {
+    ObservationDataImportResultDto,
+    ObservationDataImportRowDto,
+} from '../dtos/import-observation-data.dto';
+import { ViewSourceSpecificationDto } from 'src/metadata/source-specifications/dtos/view-source-specification.dto';
+import { getObservationOriginLabel } from './observation-source-label.util';
+import { LoggedInUserDto } from 'src/user/dtos/logged-in-user.dto';
+import { DataEntryAndCorrectionCheckService } from './data-entry-corection-check.service';
 
 @Injectable()
 export class ObservationsService {
@@ -34,6 +46,10 @@ export class ObservationsService {
         private usersService: UsersService,
         private generalSettingsService: GeneralSettingsService,
         private eventEmitter: EventEmitter2,
+        private stationsService: StationsService,
+        private elementsService: ElementsService,
+        private sourceSpecificationsService: SourceSpecificationsService,
+        private dataEntryCheckService: DataEntryAndCorrectionCheckService,
     ) {
     }
 
@@ -141,7 +157,13 @@ export class ObservationsService {
 
     private async createViewObsDtos(obsEntities: ObservationEntity[]): Promise<ViewObservationDto[]> {
         const obsView: ViewObservationDto[] = [];
+        const sourceIds = [...new Set(obsEntities.map(obsEntity => obsEntity.sourceId))];
+        const sourcesById = new Map<number, ViewSourceSpecificationDto>(
+            this.sourceSpecificationsService.findSourcesByIds(sourceIds).map(source => [source.id, source])
+        );
+
         for (const obsEntity of obsEntities) {
+            const source = sourcesById.get(obsEntity.sourceId);
             const viewObs: ViewObservationDto = {
                 stationId: obsEntity.stationId,
                 elementId: obsEntity.elementId,
@@ -156,6 +178,9 @@ export class ObservationsService {
                 qcTestLog: obsEntity.qcTestLog,
                 log: this.createViewLog(obsEntity),
                 entryDatetime: obsEntity.entryDateTime.toISOString(),
+                sourceName: source?.name ?? '',
+                sourceType: source?.sourceType ?? null,
+                observationOrigin: getObservationOriginLabel(source),
             };
             obsView.push(viewObs);
         }
@@ -302,6 +327,202 @@ export class ObservationsService {
             observationKeys,
         });
 
+    }
+
+    public async importObservationDataRows(rows: ObservationDataImportRowDto[], user: LoggedInUserDto): Promise<ObservationDataImportResultDto> {
+        const rejectedRows: ObservationDataImportResultDto['rejectedRows'] = [];
+        const acceptedRows: { rowNumber: number; sourceRow: ObservationDataImportRowDto; observation: CreateObservationDto }[] = [];
+        const stationIds = new Set(this.stationsService.find().map(station => station.id));
+        const elements = this.elementsService.find();
+        const elementById = new Map(elements.map(element => [element.id, element]));
+        const elementByCode = new Map<string, number>();
+        for (const element of elements) {
+            elementByCode.set(element.abbreviation.toLowerCase(), element.id);
+            elementByCode.set(element.name.toLowerCase(), element.id);
+        }
+
+        const sources = this.sourceSpecificationsService.findAll().filter(source => !source.disabled);
+        const sourceById = new Map(sources.map(source => [source.id, source]));
+        const sourceByName = new Map(sources.map(source => [source.name.toLowerCase(), source]));
+        const defaultSource = sources.find(source => source.sourceType === SourceTypeEnum.IMPORT) || sources[0];
+
+        rows.forEach((row, index) => {
+            const rowNumber = index + 2;
+            const stationId = this.toOptionalString(row.stationId);
+            const elementText = this.toOptionalString(row.element);
+            const observationDatetimeText = this.toOptionalString(row.observationDatetime);
+            const reasons: string[] = [];
+
+            if (!stationId) reasons.push('Station ID is required');
+            if (stationId && !stationIds.has(stationId)) reasons.push(`Station ID '${stationId}' does not exist`);
+
+            if (!elementText) reasons.push('Element is required');
+            const elementId = elementText ? this.resolveElementId(elementText, elementById, elementByCode) : undefined;
+            if (elementText && elementId === undefined) reasons.push(`Element '${elementText}' does not exist`);
+
+            if (!observationDatetimeText) reasons.push('Observation datetime is required');
+            const observationDatetime = observationDatetimeText ? new Date(observationDatetimeText) : null;
+            if (observationDatetimeText && !this.isValidDate(observationDatetime)) reasons.push('Observation datetime must be a valid date/time');
+
+            const value = this.parseRequiredNumber(row.value, 'Value', reasons);
+            const level = this.parseOptionalInteger(row.level, 'Level', reasons) ?? 0;
+            const interval = this.parseOptionalInteger(row.interval, 'Interval', reasons) ?? 0;
+            const sourceId = this.resolveSourceId(row.source, sourceById, sourceByName, defaultSource?.id, reasons);
+            this.validateManualImportSourcePermission(sourceId, user, reasons);
+
+            if (reasons.length > 0 || !stationId || elementId === undefined || !observationDatetime) {
+                rejectedRows.push({
+                    rowNumber,
+                    stationId,
+                    element: elementText,
+                    reasons,
+                    row,
+                });
+                return;
+            }
+
+            acceptedRows.push({
+                rowNumber,
+                sourceRow: row,
+                observation: {
+                    stationId,
+                    elementId,
+                    sourceId,
+                    level,
+                    datetime: observationDatetime.toISOString(),
+                    interval,
+                    value,
+                    flag: null,
+                    comment: this.toOptionalString(row.comment) || null,
+                },
+            });
+        });
+
+        let importedRows = 0;
+        for (let i = 0; i < acceptedRows.length; i++) {
+            try {
+                await this.dataEntryCheckService.checkData([acceptedRows[i].observation], user, 'data-entry');
+                await this.bulkPut([acceptedRows[i].observation], user.id, QCStatusEnum.NONE);
+                importedRows++;
+            } catch (error) {
+                rejectedRows.push({
+                    rowNumber: acceptedRows[i].rowNumber,
+                    stationId: acceptedRows[i].observation.stationId,
+                    element: String(acceptedRows[i].observation.elementId),
+                    reasons: [this.formatImportSaveError(error)],
+                    row: acceptedRows[i].sourceRow,
+                });
+            }
+        }
+
+        return {
+            totalRows: rows.length,
+            importedRows,
+            rejectedRows,
+        };
+    }
+
+    private validateManualImportSourcePermission(sourceId: number, user: LoggedInUserDto, reasons: string[]): void {
+        if (user.isSystemAdmin || sourceId === 0) return;
+
+        if (!user.permissions) {
+            reasons.push('Could not check import permissions');
+            return;
+        }
+
+        const importPermissions = user.permissions.importPermissions;
+        if (!importPermissions) {
+            reasons.push('Not authorised to import data');
+            return;
+        }
+
+        if (importPermissions.importTemplateIds && !importPermissions.importTemplateIds.includes(sourceId)) {
+            reasons.push('Not authorised to access the import');
+        }
+    }
+
+    private resolveElementId(
+        elementText: string,
+        elementById: Map<number, unknown>,
+        elementByCode: Map<string, number>,
+    ): number | undefined {
+        const numericElementId = Number(elementText);
+        if (Number.isInteger(numericElementId) && elementById.has(numericElementId)) return numericElementId;
+        return elementByCode.get(elementText.toLowerCase());
+    }
+
+    private resolveSourceId(
+        sourceValue: unknown,
+        sourceById: Map<number, unknown>,
+        sourceByName: Map<string, unknown>,
+        defaultSourceId: number | undefined,
+        reasons: string[],
+    ): number {
+        const sourceText = this.toOptionalString(sourceValue);
+        if (!sourceText) {
+            if (defaultSourceId !== undefined) return defaultSourceId;
+            reasons.push('Source is required because no import source exists');
+            return 0;
+        }
+
+        const numericSourceId = Number(sourceText);
+        if (Number.isInteger(numericSourceId) && sourceById.has(numericSourceId)) return numericSourceId;
+        const sourceByNameMatch = sourceByName.get(sourceText.toLowerCase());
+        if (sourceByNameMatch && typeof sourceByNameMatch === 'object' && 'id' in sourceByNameMatch && typeof sourceByNameMatch.id === 'number') {
+            return sourceByNameMatch.id;
+        }
+
+        reasons.push(`Source '${sourceText}' does not exist`);
+        return 0;
+    }
+
+    private toOptionalString(value: unknown): string | undefined {
+        if (value === undefined || value === null) return undefined;
+        const text = String(value).trim();
+        return text === '' ? undefined : text;
+    }
+
+    private parseRequiredNumber(value: unknown, fieldName: string, reasons: string[]): number {
+        const text = this.toOptionalString(value);
+        if (!text) {
+            reasons.push(`${fieldName} is required`);
+            return 0;
+        }
+
+        const numberValue = Number(text);
+        if (!Number.isFinite(numberValue)) {
+            reasons.push(`${fieldName} must be numeric`);
+            return 0;
+        }
+
+        return numberValue;
+    }
+
+    private parseOptionalInteger(value: unknown, fieldName: string, reasons: string[]): number | undefined {
+        const text = this.toOptionalString(value);
+        if (!text) return undefined;
+
+        const numberValue = Number(text);
+        if (!Number.isInteger(numberValue)) {
+            reasons.push(`${fieldName} must be an integer`);
+            return undefined;
+        }
+
+        return numberValue;
+    }
+
+    private isValidDate(value: Date | null): value is Date {
+        return value instanceof Date && !Number.isNaN(value.getTime());
+    }
+
+    private formatImportSaveError(error: unknown): string {
+        if (error && typeof error === 'object' && 'detail' in error && typeof error.detail === 'string') {
+            return error.detail;
+        }
+        if (error instanceof Error && error.message) {
+            return error.message;
+        }
+        return 'Could not save observation row';
     }
 
     public async softDelete(obsDtos: DeleteObservationDto[], userId: number): Promise<number> {
@@ -561,27 +782,7 @@ export class ObservationsService {
             deleted: false,
         });
 
-        const obsView: ViewObservationDto[] = [];
-        for (const obsEntity of obsEntities) {
-            const viewObs: ViewObservationDto = {
-                stationId: obsEntity.stationId,
-                elementId: obsEntity.elementId,
-                sourceId: obsEntity.sourceId,
-                level: obsEntity.level,
-                interval: obsEntity.interval,
-                datetime: obsEntity.datetime.toISOString(),
-                value: obsEntity.value,
-                flag: obsEntity.flag,
-                comment: obsEntity.comment,
-                qcStatus: obsEntity.qcStatus,
-                qcTestLog: null,
-                log: [],
-                entryDatetime: obsEntity.entryDateTime.toISOString()
-            };
-            obsView.push(viewObs);
-        }
-
-        return obsView;
+        return this.createViewObsDtos(obsEntities);
     }
 
 }
