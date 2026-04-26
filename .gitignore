@@ -30,3 +30,11 @@ front-end/pwa/aws-ingestion-layer/**/*.pyc
 # Editor swap files
 *.swp
 *.swo
+
+# Local/generated frontend data
+front-end/pwa/data/
+
+# AWS ingestion local/generated artifacts
+front-end/pwa/aws-ingestion-layer/data/
+front-end/pwa/aws-ingestion-layer/outputs/
+front-end/pwa/aws-ingestion-layer/notebooks/
