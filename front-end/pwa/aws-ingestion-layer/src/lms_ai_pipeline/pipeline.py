@@ -4,6 +4,8 @@ from typing import Dict, List
 
 from .config import (
     AUTOENCODER_PREDICTIONS_FILE,
+    AUTOENCODER_HISTORY_FILE,
+    AUTOENCODER_STATUS_FILE,
     COMBINED_PREDICTIONS_FILE,
     ENSEMBLE_PREDICTIONS_FILE,
     ISOLATION_FOREST_PREDICTIONS_FILE,
@@ -22,6 +24,9 @@ from .core import FEATURE_FIELDS, NORMALIZED_FIELDS, calculate_feature_rows, gro
 from .ensemble import ENSEMBLE_FIELDS, ensemble_predictions
 from .io import read_csv, write_csv
 from .models import (
+    AUTOENCODER_HISTORY_FIELDS,
+    AUTOENCODER_STATUS_FIELDS,
+    AutoencoderConfig,
     PREDICTION_FIELDS,
     autoencoder_predictions,
     isolation_forest_predictions,
@@ -30,6 +35,9 @@ from .models import (
     random_forest_status_rows,
     zscore_predictions,
 )
+from .reporting import generate_model_evaluation_report
+from .visualisations import generate_visualisations
+from .genai import generate_genai_outputs
 
 
 def train_models() -> int:
@@ -55,7 +63,7 @@ def train_models() -> int:
     return len(train_features)
 
 
-def predict_anomalies() -> int:
+def predict_anomalies(config: AutoencoderConfig | None = None) -> int:
     if not TEST_SPLIT_FILE.exists():
         train_models()
     test_rows = read_csv(TEST_SPLIT_FILE)
@@ -64,13 +72,16 @@ def predict_anomalies() -> int:
     z_rows = zscore_predictions(test_rows)
     if_rows = isolation_forest_predictions(test_rows)
     svm_rows = one_class_svm_predictions(test_rows)
-    ae_rows = autoencoder_predictions(test_rows)
+    train_rows = read_csv(TRAIN_SPLIT_FILE)
+    ae_rows, ae_history_rows, ae_status_rows = autoencoder_predictions(train_rows, test_rows, config)
     rf_status = random_forest_status_rows()
 
     write_csv(ZSCORE_PREDICTIONS_FILE, z_rows, PREDICTION_FIELDS)
     write_csv(ISOLATION_FOREST_PREDICTIONS_FILE, if_rows, PREDICTION_FIELDS)
     write_csv(ONE_CLASS_SVM_PREDICTIONS_FILE, svm_rows, PREDICTION_FIELDS)
     write_csv(AUTOENCODER_PREDICTIONS_FILE, ae_rows, PREDICTION_FIELDS)
+    write_csv(AUTOENCODER_HISTORY_FILE, ae_history_rows, AUTOENCODER_HISTORY_FIELDS)
+    write_csv(AUTOENCODER_STATUS_FILE, ae_status_rows, AUTOENCODER_STATUS_FIELDS)
     write_csv(RANDOM_FOREST_STATUS_FILE, rf_status, ["modelName", "status", "reason", "requiredInput"])
 
     combined = z_rows + if_rows + svm_rows + ae_rows
@@ -127,7 +138,11 @@ def insufficient_series_status_rows(summary: List[Dict[str, object]]) -> List[Di
     return rows
 
 
-def run_all() -> int:
+def run_all(config: AutoencoderConfig | None = None) -> int:
     prepare()
     train_models()
-    return predict_anomalies()
+    prediction_count = predict_anomalies(config)
+    generate_model_evaluation_report()
+    generate_visualisations()
+    generate_genai_outputs()
+    return prediction_count

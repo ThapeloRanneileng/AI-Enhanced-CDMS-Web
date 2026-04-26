@@ -86,10 +86,14 @@ The pipeline creates:
 - Z-score: always available.
 - Isolation Forest: uses scikit-learn if installed; otherwise a deterministic seasonal-distance fallback is written so the pipeline stays runnable.
 - One-Class SVM: uses scikit-learn if installed; otherwise a deterministic seasonal-distance fallback is written.
-- Autoencoder: optional. If TensorFlow/Keras is unavailable, `lms_autoencoder_predictions.csv` is created with headers only and model status says unavailable.
+- Autoencoder: optional TensorFlow/Keras model. If TensorFlow is available, it trains on normalized numeric LMS training features, evaluates reconstruction error on the test split, and writes predictions, training history, and status. If TensorFlow is unavailable, `lms_autoencoder_predictions.csv` is created with headers only and model status says unavailable.
 - Random Forest: not trained because this cleaned LMS CSV has no reliable `NORMAL`, `SUSPECT`, or `FAILED` labels. `lms_random_forest_status.csv` documents the requirement for future QC-reviewed labels.
 
-Prediction is never done by GenAI. Explanations are deterministic templates for now and can later be replaced by a Copilot/OpenAI-compatible explanation adapter.
+Prediction is never done by GenAI. The GenAI reporting adapter defaults to deterministic template mode, can be disabled, and only enables Microsoft Copilot mode when official API environment variables are supplied:
+
+- `COPILOT_API_BASE_URL`
+- `COPILOT_API_KEY`
+- `COPILOT_TENANT_ID` when required by the provider
 
 ## Outputs
 
@@ -112,10 +116,23 @@ Key files:
 - `lms_isolation_forest_predictions.csv`
 - `lms_one_class_svm_predictions.csv`
 - `lms_autoencoder_predictions.csv`
+- `lms_autoencoder_training_history.csv`
+- `lms_autoencoder_status.csv`
 - `lms_random_forest_status.csv`
 - `lms_anomaly_predictions.csv`
 - `lms_ensemble_anomaly_predictions.csv`
 - `lms_qc_review_handoff.csv`
+- `lms_model_evaluation_summary.csv`
+- `lms_model_evaluation_summary.md`
+- `lms_model_evaluation_summary.json`
+- `lms_genai_model_summary.md`
+- `lms_genai_reviewer_explanations.csv`
+- `visualisations/model_decision_distribution.png`
+- `visualisations/station_anomaly_counts_top20.png`
+- `visualisations/element_anomaly_counts.png`
+- `visualisations/model_agreement_distribution.png`
+- `visualisations/train_test_rows_by_station_top20.png`
+- `visualisations/autoencoder_loss_curve.png` when autoencoder history exists
 
 Rejected rows, if any, are written to:
 
@@ -134,6 +151,21 @@ python3 -m src.lms_ai_pipeline.train
 python3 -m src.lms_ai_pipeline.predict
 python3 -m src.lms_ai_pipeline.run_all
 ```
+
+Autoencoder options:
+
+```bash
+PYTHONPATH=src ./.venv/bin/python -m src.lms_ai_pipeline.run_all --epochs 10 --batch-size 128
+```
+
+Supported options are:
+
+- `--epochs`
+- `--batch-size`
+- `--validation-split`
+- `--patience`
+- `--contamination`
+- `--max-training-rows`
 
 The QC Review handoff contains `SUSPECT`, `FAILED`, model-agreement anomalies, and validation warnings such as `tmin > tmax`. It supports the existing workflow:
 

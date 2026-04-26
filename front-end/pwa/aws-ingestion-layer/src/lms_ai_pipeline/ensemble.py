@@ -6,7 +6,7 @@ from typing import Dict, List, Sequence, Tuple
 
 ENSEMBLE_FIELDS = [
     "stationId", "stationName", "district", "stationType", "observationDatetime", "elementCode", "elementName", "value", "unit",
-    "modelAgreementCount", "agreeingModels", "anomalyScore", "confidence", "severity", "outcome",
+    "contributingModels", "modelAgreementCount", "modelAgreementRatio", "agreeingModels", "anomalyScore", "confidence", "severity", "finalDecision", "outcome",
     "explanation", "recommendedReviewerAction",
 ]
 
@@ -26,6 +26,8 @@ def ensemble_predictions(model_rows: Sequence[Dict[str, object]]) -> List[Dict[s
         flagged = [row for row in rows if row["outcome"] in {"SUSPECT", "FAILED"}]
         failed = [row for row in rows if row["outcome"] == "FAILED"]
         agreement_count = len(flagged)
+        contributing_models = [str(row["modelName"]) for row in rows]
+        agreement_ratio = agreement_count / len(rows) if rows else 0.0
         if agreement_count == 0:
             outcome, severity, confidence = "NORMAL", "LOW", "0.50"
         elif agreement_count == 1:
@@ -45,11 +47,14 @@ def ensemble_predictions(model_rows: Sequence[Dict[str, object]]) -> List[Dict[s
             "elementName": first["elementName"],
             "value": first["value"],
             "unit": first["unit"],
+            "contributingModels": ";".join(contributing_models),
             "modelAgreementCount": agreement_count,
+            "modelAgreementRatio": f"{agreement_ratio:.6f}",
             "agreeingModels": ";".join(str(row["modelName"]) for row in flagged),
             "anomalyScore": max((float(row["anomalyScore"]) for row in flagged), default=0.0),
             "confidence": confidence,
             "severity": severity,
+            "finalDecision": outcome,
             "outcome": outcome,
             "explanation": f"{agreement_count} model(s) flagged this observation; ensemble outcome is {outcome}.",
             "recommendedReviewerAction": "Review LMS source record and nearby daily sequence." if outcome != "NORMAL" else "No reviewer action required.",

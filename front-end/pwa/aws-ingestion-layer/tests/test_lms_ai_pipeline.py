@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 
 import pytest
 
 from lms_ai_pipeline.core import calculate_feature_rows, inspect_rows, normalize_rows, split_train_test
 from lms_ai_pipeline.io import read_csv
-from lms_ai_pipeline.models import random_forest_status_rows, zscore_predictions
+from lms_ai_pipeline.ensemble import ensemble_predictions
+from lms_ai_pipeline.models import (
+    AutoencoderConfig,
+    PREDICTION_FIELDS,
+    autoencoder_predictions,
+    build_prediction,
+    detect_tensorflow_keras,
+    random_forest_status_rows,
+    zscore_predictions,
+)
 from lms_ai_pipeline import inspect as inspect_module
 from lms_ai_pipeline import pipeline
 
@@ -242,3 +252,175 @@ def test_lms_predict_fails_clearly_on_empty_test_data(tmp_path: Path, monkeypatc
 
     with pytest.raises(ValueError, match="No LMS test rows"):
         pipeline.predict_anomalies()
+
+
+def feature_row(day: int, value: float = 1.0) -> dict[str, object]:
+    return {
+        "stationId": "LESBUT01",
+        "stationName": "BUTHA-BUTHE",
+        "district": "BUTHA-BUTHE",
+        "stationType": "CLIMATE",
+        "observationDatetime": f"2020-01-{day:02d}",
+        "elementCode": "rain",
+        "elementName": "Rainfall",
+        "value": f"{value:.6f}",
+        "unit": "mm",
+        "source": "LMS Historical Daily CSV",
+        "dataType": "historical",
+        "originalRowNumber": day + 1,
+        "isImputed": "false",
+        "imputationMethod": "",
+        "qualityFlags": "",
+        "stationIdEncoding": 0,
+        "elementCodeEncoding": 0,
+        "year": 2020,
+        "month": 1,
+        "day": day,
+        "dayOfYear": day,
+        "monthlyMean": "1.000000",
+        "monthlyStandardDeviation": "0.100000",
+        "z_score": "0.000000",
+        "seasonal_z_score": "0.000000",
+        "rolling_mean_7": "1.000000",
+        "rolling_std_7": "0.000000",
+        "rolling_mean_30": "1.000000",
+        "rolling_std_30": "0.000000",
+        "previous_value": "1.000000",
+        "value_difference": "0.000000",
+        "missing_indicator": "false",
+    }
+
+
+def test_lms_tensorflow_keras_detection_has_expected_keys():
+    info = detect_tensorflow_keras()
+
+    assert {"tensorflowInstalled", "kerasInstalled", "tensorflowVersion", "kerasVersion", "cpuDevices", "gpuDevices"}.issubset(info)
+    assert isinstance(info["cpuDevices"], list)
+    assert isinstance(info["gpuDevices"], list)
+
+
+def test_lms_autoencoder_unavailable_path(monkeypatch):
+    monkeypatch.setattr("lms_ai_pipeline.models.detect_tensorflow_keras", lambda: {
+        "tensorflowInstalled": False,
+        "kerasInstalled": False,
+        "tensorflowVersion": "",
+        "kerasVersion": "",
+        "cpuDevices": [],
+        "gpuDevices": [],
+    })
+
+    predictions, history, status = autoencoder_predictions([feature_row(1)], [feature_row(2)], AutoencoderConfig(epochs=3))
+
+    assert predictions == []
+    assert history == []
+    assert status[0]["status"] == "unavailable"
+    assert status[0]["epochs"] == 3
+
+
+def test_lms_epoch_config_parsing(monkeypatch):
+    from lms_ai_pipeline import run_all as run_all_module
+
+    monkeypatch.setattr(sys, "argv", ["run_all", "--epochs", "10", "--batch-size", "128", "--validation-split", "0.1", "--patience", "2", "--contamination", "0.07", "--max-training-rows", "100"])
+    args = run_all_module.parse_args()
+
+    assert args.epochs == 10
+    assert args.batch_size == 128
+    assert args.validation_split == 0.1
+    assert args.patience == 2
+    assert args.contamination == 0.07
+    assert args.max_training_rows == 100
+
+
+def test_lms_autoencoder_prediction_schema():
+    row = build_prediction(feature_row(1), "Autoencoder", 0.123, "SUSPECT", "MEDIUM", "0.75", "Autoencoder reconstruction error is high.")
+
+    assert list(row.keys()) == PREDICTION_FIELDS
+    assert row["modelName"] == "Autoencoder"
+    assert row["anomalyScore"] == "0.123000"
+
+
+def test_lms_report_summary_generation(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import reporting
+
+    files = {
+        "NORMALIZED_FILE": tmp_path / "normalized.csv",
+        "TRAIN_SPLIT_FILE": tmp_path / "train.csv",
+        "TEST_SPLIT_FILE": tmp_path / "test.csv",
+        "MODEL_METADATA_FILE": tmp_path / "metadata.csv",
+        "RANDOM_FOREST_STATUS_FILE": tmp_path / "rf.csv",
+        "AUTOENCODER_STATUS_FILE": tmp_path / "ae_status.csv",
+        "AUTOENCODER_HISTORY_FILE": tmp_path / "ae_history.csv",
+        "ENSEMBLE_PREDICTIONS_FILE": tmp_path / "ensemble.csv",
+        "MODEL_EVALUATION_SUMMARY_CSV": tmp_path / "summary.csv",
+        "MODEL_EVALUATION_SUMMARY_MD": tmp_path / "summary.md",
+        "MODEL_EVALUATION_SUMMARY_JSON": tmp_path / "summary.json",
+    }
+    for name, path in files.items():
+        monkeypatch.setattr(reporting, name, path)
+    (tmp_path / "normalized.csv").write_text("stationId\nLESBUT01\n", encoding="utf-8")
+    (tmp_path / "train.csv").write_text("stationId\nLESBUT01\n", encoding="utf-8")
+    (tmp_path / "test.csv").write_text("stationId\nLESBUT01\n", encoding="utf-8")
+    (tmp_path / "metadata.csv").write_text("modelName,status,message\nAutoencoder,trained,ok\n", encoding="utf-8")
+    (tmp_path / "rf.csv").write_text("modelName,status,reason,requiredInput\nRandom Forest,not_trained,no labels,labels\n", encoding="utf-8")
+    (tmp_path / "ae_status.csv").write_text("modelName,status,epochs,batchSize,validationSplit,patience,contamination\nAutoencoder,trained,10,128,0.2,5,0.05\n", encoding="utf-8")
+    (tmp_path / "ae_history.csv").write_text("epoch,loss,validationLoss\n1,0.2,0.3\n2,0.1,0.2\n", encoding="utf-8")
+    for name in ["lms_zscore_predictions.csv", "lms_isolation_forest_predictions.csv", "lms_one_class_svm_predictions.csv", "lms_autoencoder_predictions.csv"]:
+        (tmp_path / name).write_text("stationId,outcome,anomalyScore\nLESBUT01,NORMAL,0.1\n", encoding="utf-8")
+    (tmp_path / "ensemble.csv").write_text("stationId,observationDatetime,elementCode,value,finalDecision,outcome,severity,modelAgreementCount,anomalyScore\nLESBUT01,2020-01-01,rain,1,FAILED,FAILED,HIGH,2,5\n", encoding="utf-8")
+
+    payload = reporting.generate_model_evaluation_report()
+
+    assert payload["totalNormalizedRows"] == 1
+    assert files["MODEL_EVALUATION_SUMMARY_CSV"].exists()
+    assert files["MODEL_EVALUATION_SUMMARY_MD"].exists()
+    assert files["MODEL_EVALUATION_SUMMARY_JSON"].exists()
+
+
+def test_lms_visualisation_output_paths(monkeypatch, tmp_path: Path):
+    from lms_ai_pipeline import visualisations
+
+    saved: list[Path] = []
+    monkeypatch.setattr(visualisations, "VISUALISATIONS_DIR", tmp_path)
+    monkeypatch.setattr(visualisations, "safe_read_csv", lambda path: [] if path == visualisations.AUTOENCODER_HISTORY_FILE else [{"stationId": "LESBUT01", "elementCode": "rain", "finalDecision": "FAILED", "modelAgreementCount": "2"}])
+    monkeypatch.setattr(visualisations, "save_bar_chart", lambda counts, title, xlabel, ylabel, path, rotate=False: saved.append(path))
+
+    outputs = visualisations.generate_visualisations()
+
+    assert tmp_path / "model_decision_distribution.png" in outputs
+    assert tmp_path / "station_anomaly_counts_top20.png" in outputs
+    assert len(saved) == 5
+
+
+def test_lms_genai_template_fallback(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import genai
+
+    monkeypatch.delenv("COPILOT_API_BASE_URL", raising=False)
+    monkeypatch.delenv("COPILOT_API_KEY", raising=False)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "microsoft_copilot")
+    monkeypatch.setattr(genai, "ENSEMBLE_PREDICTIONS_FILE", tmp_path / "ensemble.csv")
+    monkeypatch.setattr(genai, "MODEL_EVALUATION_SUMMARY_JSON", tmp_path / "summary.json")
+    monkeypatch.setattr(genai, "GENAI_MODEL_SUMMARY_FILE", tmp_path / "summary.md")
+    monkeypatch.setattr(genai, "GENAI_REVIEWER_EXPLANATIONS_FILE", tmp_path / "explanations.csv")
+    (tmp_path / "ensemble.csv").write_text("stationId,observationDatetime,elementCode,finalDecision,outcome,severity,confidence,modelAgreementCount,anomalyScore,explanation\nLESBUT01,2020-01-01,rain,SUSPECT,SUSPECT,MEDIUM,0.7,1,2,review\n", encoding="utf-8")
+    (tmp_path / "summary.json").write_text("{}", encoding="utf-8")
+
+    provider = genai.generate_genai_outputs()
+
+    assert provider.name == "template"
+    assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
+    assert "template" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
+
+
+def test_lms_ensemble_includes_autoencoder_when_available():
+    base = feature_row(1)
+    model_rows = [
+        build_prediction(base, "Z-score", 0.1, "NORMAL", "LOW", "0.50", "ok"),
+        build_prediction(base, "Isolation Forest", 0.1, "NORMAL", "LOW", "0.50", "ok"),
+        build_prediction(base, "Autoencoder", 4.2, "FAILED", "HIGH", "0.95", "reconstruction high"),
+    ]
+
+    rows = ensemble_predictions(model_rows)
+
+    assert rows[0]["modelAgreementCount"] == 1
+    assert "Autoencoder" in rows[0]["contributingModels"]
+    assert rows[0]["agreeingModels"] == "Autoencoder"

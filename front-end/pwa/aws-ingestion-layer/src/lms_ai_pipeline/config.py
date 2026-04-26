@@ -30,10 +30,18 @@ ZSCORE_PREDICTIONS_FILE = OUTPUT_DIR / "lms_zscore_predictions.csv"
 ISOLATION_FOREST_PREDICTIONS_FILE = OUTPUT_DIR / "lms_isolation_forest_predictions.csv"
 ONE_CLASS_SVM_PREDICTIONS_FILE = OUTPUT_DIR / "lms_one_class_svm_predictions.csv"
 AUTOENCODER_PREDICTIONS_FILE = OUTPUT_DIR / "lms_autoencoder_predictions.csv"
+AUTOENCODER_HISTORY_FILE = OUTPUT_DIR / "lms_autoencoder_training_history.csv"
+AUTOENCODER_STATUS_FILE = OUTPUT_DIR / "lms_autoencoder_status.csv"
 RANDOM_FOREST_STATUS_FILE = OUTPUT_DIR / "lms_random_forest_status.csv"
 COMBINED_PREDICTIONS_FILE = OUTPUT_DIR / "lms_anomaly_predictions.csv"
 ENSEMBLE_PREDICTIONS_FILE = OUTPUT_DIR / "lms_ensemble_anomaly_predictions.csv"
 QC_HANDOFF_FILE = OUTPUT_DIR / "lms_qc_review_handoff.csv"
+MODEL_EVALUATION_SUMMARY_CSV = OUTPUT_DIR / "lms_model_evaluation_summary.csv"
+MODEL_EVALUATION_SUMMARY_MD = OUTPUT_DIR / "lms_model_evaluation_summary.md"
+MODEL_EVALUATION_SUMMARY_JSON = OUTPUT_DIR / "lms_model_evaluation_summary.json"
+GENAI_MODEL_SUMMARY_FILE = OUTPUT_DIR / "lms_genai_model_summary.md"
+GENAI_REVIEWER_EXPLANATIONS_FILE = OUTPUT_DIR / "lms_genai_reviewer_explanations.csv"
+VISUALISATIONS_DIR = OUTPUT_DIR / "visualisations"
 
 STATIONS = {
     "LESBER07": {"stationName": "PHUTHIATSANA", "district": "BEREA", "stationType": "CLIMATE"},
