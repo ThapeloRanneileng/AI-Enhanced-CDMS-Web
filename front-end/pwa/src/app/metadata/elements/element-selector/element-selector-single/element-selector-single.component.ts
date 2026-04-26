@@ -13,6 +13,7 @@ export class ElementSelectorSingleComponent implements OnChanges, OnDestroy {
   @Input() public displayCancelOption!: boolean
   @Input() public errorMessage!: string;
   @Input() public includeOnlyIds!: number[];
+  @Input() public options: ElementCacheModel[] | null = null;
   @Input() public selectedId!: number | null;
   @Output() public selectedIdChange = new EventEmitter<number>();
 
@@ -32,7 +33,7 @@ export class ElementSelectorSingleComponent implements OnChanges, OnDestroy {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['includeOnlyIds']) {
+    if (changes['options'] || changes['includeOnlyIds']) {
       this.setElementsToInclude();
     }
     if (changes['selectedId']) {
@@ -46,13 +47,22 @@ export class ElementSelectorSingleComponent implements OnChanges, OnDestroy {
   }
 
   private setElementsToInclude(): void {
-    this.elements = this.includeOnlyIds && this.includeOnlyIds.length > 0 ? this.allElements.filter(item => this.includeOnlyIds.includes(item.id)) : this.allElements;
+    if (this.options) {
+      this.elements = this.options;
+    } else if (this.includeOnlyIds && this.includeOnlyIds.length > 0) {
+      const includedIds = new Set(this.includeOnlyIds);
+      this.elements = this.allElements.filter(item => includedIds.has(item.id));
+    } else {
+      this.elements = this.allElements;
+    }
   }
 
   private setSelected(): void {
-    if (this.selectedId) {
+    if (this.selectedId && this.elements) {
       const found = this.elements.find(data => data.id === this.selectedId);
       this.selectedElement = found ? found : null;
+    } else {
+      this.selectedElement = null;
     }
   }
 
@@ -61,7 +71,16 @@ export class ElementSelectorSingleComponent implements OnChanges, OnDestroy {
   }
 
   protected onSelectedOptionChange(selectedOption: ElementCacheModel | null) {
-    this.selectedId = selectedOption ? selectedOption.id : 0;
+    const selectedId = selectedOption ? selectedOption.id : 0;
+    if (selectedId === this.selectedId) {
+      return;
+    }
+
+    this.selectedId = selectedId;
     this.selectedIdChange.emit(this.selectedId);
+  }
+
+  protected trackByElementId(_index: number, option: ElementCacheModel): number {
+    return option.id;
   }
 }

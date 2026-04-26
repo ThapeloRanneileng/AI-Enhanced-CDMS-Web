@@ -28,6 +28,7 @@ import { UserFormSettingsComponent } from './user-form-settings/user-form-settin
 import { ObservationAnomalyAssessmentsService } from 'src/app/quality-control/services/observation-anomaly-assessments.service';
 import { ViewObservationAnomalyAssessmentModel } from 'src/app/quality-control/models/view-observation-anomaly-assessment.model';
 import { NumberUtils } from 'src/app/shared/utils/number.utils';
+import { ElementCacheModel } from 'src/app/metadata/elements/services/elements-cache.service';
 
 type ObservationAnomalyReviewStatus = 'accepted' | 'overridden' | 'needs_investigation';
 
@@ -137,6 +138,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected observationAnomalyAssessmentsByKey: Map<string, ViewObservationAnomalyAssessmentModel> = new Map<string, ViewObservationAnomalyAssessmentModel>();
 
   protected observationEntries: ObservationEntry[] = [];
+  protected elementSelectorOptions: ElementCacheModel[] = [];
   protected isPreparingLayout: boolean = false;
   protected layoutErrorMessage: string = '';
   protected selectedGridObservation: ObservationEntry | null = null;
@@ -193,6 +195,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       this.station = this.cachedMetadataService.getStation(stationId);
       this.source = this.cachedMetadataService.getSource(sourceId);
       this.formDefinitions = new FormEntryDefinition(this.station, this.source, this.cachedMetadataService);
+      this.elementSelectorOptions = this.getElementSelectorOptions();
 
       if (this.hasUsableFormMetadata()) {
         this.loadObservations();
@@ -356,12 +359,18 @@ export class FormEntryComponent implements OnInit, OnDestroy {
    * @returns 
    */
   public onElementChange(id: number | null): void {
-    if (id === null) {
+    if (id === null || id === this.formDefinitions.elementSelectorValue) {
       return;
     }
 
     this.formDefinitions.elementSelectorValue = id;
     this.loadObservations();
+  }
+
+  private getElementSelectorOptions(): ElementCacheModel[] {
+    return this.formDefinitions.formMetadata.elementIds
+      .map(elementId => this.cachedMetadataService.getElement(elementId))
+      .filter((element): element is ElementCacheModel => !!element);
   }
 
   /**

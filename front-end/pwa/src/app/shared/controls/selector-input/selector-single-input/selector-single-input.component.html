@@ -11,14 +11,15 @@
                     (inputEnterKeyPress)="onSearchEnterKeyPress()" />
             </div>
 
-            <div class="list-group rounded-0">
-                <button type="button" class="list-group-item list-group-item-action"
-                    [class.list-group-item-primary]="this.selectedOption === option"
-                    *ngFor="let option of filteredOptions"
-                    (click)="onSelectedOption(option); appSingleSelector.showDropDown(false);">
-                    {{ optionDisplayFn(option) }}
+            <cdk-virtual-scroll-viewport class="app-selector-options-viewport" [itemSize]="optionItemSize"
+                [style.height.px]="optionsViewportHeight">
+                <button type="button" class="list-group-item list-group-item-action app-selector-option"
+                    [class.list-group-item-primary]="this.selectedOption === option.option"
+                    *cdkVirtualFor="let option of filteredOptions; trackBy: trackByDisplayOption"
+                    (click)="onSelectedOption(option.option); appSingleSelector.showDropDown(false);">
+                    {{ option.display }}
                 </button>
-            </div>
+            </cdk-virtual-scroll-viewport>
         </div>
     </div>
 </app-text-input>
