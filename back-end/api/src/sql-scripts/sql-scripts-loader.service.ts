@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as path from 'node:path';
 import { FileIOService } from 'src/shared/services/file-io.service';
+import { resolveRuntimeAssetPath } from 'src/shared/utils/runtime-asset-path.util';
 import { DataSource } from 'typeorm';
 
 @Injectable()
@@ -18,10 +19,7 @@ export class SqlScriptsLoaderService {
      */
     public async addEntryDatetimeTriggerToDB() {
         try {
-            // Get the script directory from absolute path of this service file
-            // For windows platform, replace the backslashes with forward slashes.
-            const scriptsDirPath: string = __dirname.replaceAll("\\", "\/");
-            const entryDatetimeScriptsDirPath: string = `${scriptsDirPath}/default-triggers/default-entry-date-time.sql`
+            const entryDatetimeScriptsDirPath = resolveRuntimeAssetPath(__dirname, 'default-triggers', 'default-entry-date-time.sql');
             const sql: string = await this.fileIOService.readFile(entryDatetimeScriptsDirPath, 'utf8');
             //console.log('ENTRY DATE TIME SQL:', sql);
             await this.dataSource.query(sql);
@@ -37,11 +35,7 @@ export class SqlScriptsLoaderService {
      */
     public async addLogsTriggersToDB() {
         try {
-
-            // Get the script directory from absolute path of this service file
-            // For windows platform, replace the backslashes with forward slashes.
-            const scriptsDirPath: string = __dirname.replaceAll("\\", "\/");
-            const logScriptsDirPath: string = `${scriptsDirPath}/logging-triggers`
+            const logScriptsDirPath = path.dirname(resolveRuntimeAssetPath(__dirname, 'logging-triggers', 'station-log.sql'));
             const fileNames: string[] = await this.fileIOService.getFileNamesInDirectory(logScriptsDirPath);
 
             let sql: string = ''
@@ -63,10 +57,7 @@ export class SqlScriptsLoaderService {
      */
     public async addQCTestsFunctionsToDB() {
         try {
-            // Get the script directory from absolute path of this service file
-            // For windows platform, replace the backslashes with forward slashes.
-            const scriptsDirPath: string = __dirname.replaceAll("\\", "\/");
-            const entryDatetimeScriptsDirPath: string = `${scriptsDirPath}/qc-tests/qc-tests-functions.sql`
+            const entryDatetimeScriptsDirPath = resolveRuntimeAssetPath(__dirname, 'qc-tests', 'qc-tests-functions.sql');
             const sql: string = await this.fileIOService.readFile(entryDatetimeScriptsDirPath, 'utf8');
             //console.log('ENTRY DATE TIME SQL:', sql);
             await this.dataSource.query(sql);
@@ -82,10 +73,7 @@ export class SqlScriptsLoaderService {
      */
     public async addDataAvailabilityFunctionsToDB() {
         try {
-            // Get the script directory from absolute path of this service file
-            // For windows platform, replace the backslashes with forward slashes.
-            const scriptsDirPath: string = __dirname.replaceAll("\\", "\/");
-            const entryDatetimeScriptsDirPath: string = `${scriptsDirPath}/data-availability/data-availiability-details-function.sql`
+            const entryDatetimeScriptsDirPath = resolveRuntimeAssetPath(__dirname, 'data-availability', 'data-availiability-details-function.sql');
             const sql: string = await this.fileIOService.readFile(entryDatetimeScriptsDirPath, 'utf8');
             //console.log('ENTRY DATE TIME SQL:', sql);
             await this.dataSource.query(sql);

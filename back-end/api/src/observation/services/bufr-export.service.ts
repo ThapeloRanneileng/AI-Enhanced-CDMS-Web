@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { BufrExportParametersDto, DAYCLI_BUFR_ELEMENTS } from 'src/metadata/export-specifications/dtos/bufr-export-parameters.dto';
 import { FileIOService } from 'src/shared/services/file-io.service';
+import { resolveRuntimeAssetPath } from 'src/shared/utils/runtime-asset-path.util';
 import { AppConfig } from 'src/app.config';
 
 @Injectable()
@@ -15,7 +16,7 @@ export class BufrExportService {
     constructor(
         private fileIOService: FileIOService,
     ) {
-        const templatePath = path.posix.join(__dirname, 'daycli-template.json');
+        const templatePath = resolveRuntimeAssetPath(__dirname, 'daycli-template.json');
         this.daycliTemplate = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
     }
 
