@@ -1,0 +1,282 @@
+<section class="cdms-page-shell aws-real-time-shell">
+  <div class="cdms-page-header">
+    <div>
+      <span class="eyebrow">AI-Enhanced CDMS</span>
+      <h2>AWS Real Time</h2>
+      <p>Configure live AWS processing, server connections, site linkage, file interpretation, and encoding behavior in a dedicated operational workspace.</p>
+    </div>
+    <div class="cdms-header-meta">
+      <span class="cdms-header-chip">{{ servers.length }} servers</span>
+      <span class="cdms-header-chip">{{ sites.length }} sites</span>
+      <span class="cdms-header-chip">{{ structures.length }} data structures</span>
+    </div>
+  </div>
+
+  <div class="aws-tab-row">
+    <button
+      type="button"
+      *ngFor="let section of sections"
+      class="aws-tab"
+      [class.active]="activeSection === section.id"
+      (click)="setActiveSection(section.id)">
+      <i class="bi" [class]="section.icon"></i>
+      <span>{{ section.label }}</span>
+      <small *ngIf="getSectionCount(section.id) !== null">{{ getSectionCount(section.id) }}</small>
+    </button>
+  </div>
+
+  <div class="card border-0" *ngIf="activeSection === 'processing'">
+    <div class="card-header">
+      <div class="cdms-panel-title">Processing</div>
+      <div class="cdms-panel-subtitle">Control polling cadence, retry behavior, and how incoming feeds move into the shared observation pipeline.</div>
+    </div>
+    <div class="card-body">
+      <div class="aws-form-grid">
+        <label>Polling interval (minutes)<input type="number" class="form-control" [(ngModel)]="processing.pollingIntervalMinutes"></label>
+        <label>Batch window (minutes)<input type="number" class="form-control" [(ngModel)]="processing.batchWindowMinutes"></label>
+        <label>Default missing data flag<input type="text" class="form-control" [(ngModel)]="processing.defaultMissingDataFlag"></label>
+        <label>Shared observation source label<input type="text" class="form-control" [(ngModel)]="processing.sharedObservationSourceLabel"></label>
+      </div>
+      <div class="aws-toggle-row">
+        <label><input type="checkbox" [(ngModel)]="processing.autoCreateReviewQueue"> Auto-create review queue records after processing</label>
+        <label><input type="checkbox" [(ngModel)]="processing.retryFailedTransfers"> Retry failed transfers automatically</label>
+      </div>
+      <div class="aws-actions">
+        <button type="button" class="btn btn-primary btn-sm" (click)="saveProcessing()">Save Processing Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="aws-grid" *ngIf="activeSection === 'servers'">
+    <div class="card border-0">
+      <div class="card-header">
+        <div class="cdms-panel-title">Servers</div>
+        <div class="cdms-panel-subtitle">Define FTP/SFTP ingress points, authentication, folders, and base-station or message-switch behavior.</div>
+      </div>
+      <div class="card-body">
+        <div class="aws-form-grid">
+          <label>Server name<input type="text" class="form-control" [(ngModel)]="serverDraft.name"></label>
+          <label>Server mode
+            <select class="form-select" [(ngModel)]="serverDraft.mode">
+              <option value="base-station">Base Station</option>
+              <option value="message-switch">Message Switch</option>
+            </select>
+          </label>
+          <label>Transfer mode
+            <select class="form-select" [(ngModel)]="serverDraft.transferMode">
+              <option value="ftp">FTP</option>
+              <option value="sftp">SFTP</option>
+            </select>
+          </label>
+          <label>Server address<input type="text" class="form-control" [(ngModel)]="serverDraft.address"></label>
+          <label>Input folder<input type="text" class="form-control" [(ngModel)]="serverDraft.inputFolder"></label>
+          <label>Username<input type="text" class="form-control" [(ngModel)]="serverDraft.username"></label>
+          <label>Password<input type="password" class="form-control" [(ngModel)]="serverDraft.password"></label>
+          <label>Confirm password<input type="password" class="form-control" [(ngModel)]="serverDraft.confirmPassword"></label>
+        </div>
+        <div class="aws-toggle-row">
+          <label><input type="checkbox" [(ngModel)]="serverDraft.enabled"> Enabled for live polling</label>
+        </div>
+        <div class="aws-actions">
+          <button type="button" class="btn btn-primary btn-sm" (click)="saveServer()">{{ editingServerId ? 'Update Server' : 'Add Server' }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" *ngIf="editingServerId" (click)="cancelServerEdit()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0">
+      <div class="card-header">
+        <div class="cdms-panel-title">Configured Servers</div>
+        <div class="cdms-panel-subtitle">Operational connection definitions available to live AWS sites.</div>
+      </div>
+      <div class="card-body p-0">
+        <div class="app-table-container" style="max-height: 38rem;">
+          <table class="table table-hover table-sm">
+            <thead>
+              <tr><th>Name</th><th>Address</th><th>Folder</th><th>Mode</th><th>Transfer</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let server of servers">
+                <td>{{ server.name }}</td>
+                <td>{{ server.address }}</td>
+                <td>{{ server.inputFolder }}</td>
+                <td>{{ server.mode }}</td>
+                <td>{{ server.transferMode }}</td>
+                <td><span [class]="server.enabled ? 'cdms-badge-success' : 'cdms-badge-warning'">{{ server.enabled ? 'Enabled' : 'Disabled' }}</span></td>
+                <td class="text-nowrap">
+                  <button type="button" class="btn btn-outline-secondary btn-sm me-2" (click)="editServer(server)">Edit</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm" (click)="removeServer(server.id)">Remove</button>
+                </td>
+              </tr>
+              <tr *ngIf="servers.length === 0"><td colspan="7"><div class="cdms-empty-state">No AWS real-time servers configured yet.</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="aws-grid" *ngIf="activeSection === 'sites'">
+    <div class="card border-0">
+      <div class="card-header">
+        <div class="cdms-panel-title">Sites</div>
+        <div class="cdms-panel-subtitle">Link incoming AWS feeds to stations, data structures, server definitions, and operational status.</div>
+      </div>
+      <div class="card-body">
+        <div class="aws-form-grid">
+          <label>Site ID<input type="text" class="form-control" [(ngModel)]="siteDraft.siteId"></label>
+          <label>Site name<input type="text" class="form-control" [(ngModel)]="siteDraft.siteName"></label>
+          <label>Station ID<input type="text" class="form-control" [(ngModel)]="siteDraft.stationId"></label>
+          <label>Input data file<input type="text" class="form-control" [(ngModel)]="siteDraft.inputDataFile"></label>
+          <label>AWS server
+            <select class="form-select" [(ngModel)]="siteDraft.serverId">
+              <option value="">Select server</option>
+              <option *ngFor="let server of servers" [value]="server.id">{{ server.name }}</option>
+            </select>
+          </label>
+          <label>Data structure
+            <select class="form-select" [(ngModel)]="siteDraft.dataStructureId">
+              <option value="">Select data structure</option>
+              <option *ngFor="let structure of structures" [value]="structure.id">{{ structure.name }}</option>
+            </select>
+          </label>
+          <label>Missing data flag<input type="text" class="form-control" [(ngModel)]="siteDraft.missingDataFlag"></label>
+          <label>Operational status
+            <select class="form-select" [(ngModel)]="siteDraft.status">
+              <option value="active">Active</option>
+              <option value="paused">Paused</option>
+              <option value="draft">Draft</option>
+            </select>
+          </label>
+        </div>
+        <label class="aws-long-field">Operational notes<textarea class="form-control" rows="4" [(ngModel)]="siteDraft.operationalNotes"></textarea></label>
+        <div class="aws-actions">
+          <button type="button" class="btn btn-primary btn-sm" (click)="saveSite()">{{ editingSiteId ? 'Update Site' : 'Add Site' }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" *ngIf="editingSiteId" (click)="cancelSiteEdit()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0">
+      <div class="card-header">
+        <div class="cdms-panel-title">Configured Sites</div>
+        <div class="cdms-panel-subtitle">Operational AWS site definitions available to the real-time processing layer.</div>
+      </div>
+      <div class="card-body p-0">
+        <div class="app-table-container" style="max-height: 38rem;">
+          <table class="table table-hover table-sm">
+            <thead>
+              <tr><th>Site</th><th>Station</th><th>Input File</th><th>Server</th><th>Structure</th><th>Status</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let site of sites">
+                <td>{{ site.siteId }} - {{ site.siteName }}</td>
+                <td>{{ site.stationId || 'Not linked' }}</td>
+                <td>{{ site.inputDataFile }}</td>
+                <td>{{ getServerName(site.serverId) }}</td>
+                <td>{{ getStructureName(site.dataStructureId) }}</td>
+                <td>
+                  <span [class]="site.status === 'active' ? 'cdms-badge-success' : site.status === 'paused' ? 'cdms-badge-warning' : 'cdms-badge-info'">
+                    {{ site.status }}
+                  </span>
+                </td>
+                <td class="text-nowrap">
+                  <button type="button" class="btn btn-outline-secondary btn-sm me-2" (click)="editSite(site)">Edit</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm" (click)="removeSite(site.id)">Remove</button>
+                </td>
+              </tr>
+              <tr *ngIf="sites.length === 0"><td colspan="7"><div class="cdms-empty-state">No AWS real-time sites configured yet.</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="aws-grid" *ngIf="activeSection === 'structures'">
+    <div class="card border-0">
+      <div class="card-header">
+        <div class="cdms-panel-title">Data Structures</div>
+        <div class="cdms-panel-subtitle">Define how incoming AWS files are parsed and mapped before they enter the shared observation workflow.</div>
+      </div>
+      <div class="card-body">
+        <div class="aws-form-grid">
+          <label>Structure name<input type="text" class="form-control" [(ngModel)]="structureDraft.name"></label>
+          <label>File pattern<input type="text" class="form-control" [(ngModel)]="structureDraft.filePattern"></label>
+          <label>Delimiter<input type="text" class="form-control" [(ngModel)]="structureDraft.delimiter"></label>
+          <label>Header row<input type="number" class="form-control" [(ngModel)]="structureDraft.headerRow"></label>
+          <label>Datetime column<input type="text" class="form-control" [(ngModel)]="structureDraft.datetimeColumn"></label>
+          <label>Station column<input type="text" class="form-control" [(ngModel)]="structureDraft.stationColumn"></label>
+          <label>Value column<input type="text" class="form-control" [(ngModel)]="structureDraft.valueColumn"></label>
+          <label>Element column<input type="text" class="form-control" [(ngModel)]="structureDraft.elementColumn"></label>
+          <label>Interval column<input type="text" class="form-control" [(ngModel)]="structureDraft.intervalColumn"></label>
+          <label>Level column<input type="text" class="form-control" [(ngModel)]="structureDraft.levelColumn"></label>
+        </div>
+        <label class="aws-long-field">Interpretation notes<textarea class="form-control" rows="4" [(ngModel)]="structureDraft.notes"></textarea></label>
+        <div class="aws-actions">
+          <button type="button" class="btn btn-primary btn-sm" (click)="saveStructure()">{{ editingStructureId ? 'Update Structure' : 'Add Structure' }}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" *ngIf="editingStructureId" (click)="cancelStructureEdit()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0">
+      <div class="card-header">
+        <div class="cdms-panel-title">Configured Data Structures</div>
+        <div class="cdms-panel-subtitle">Reusable file-interpretation definitions for live AWS feeds and future import runs.</div>
+      </div>
+      <div class="card-body p-0">
+        <div class="app-table-container" style="max-height: 38rem;">
+          <table class="table table-hover table-sm">
+            <thead>
+              <tr><th>Name</th><th>Pattern</th><th>Delimiter</th><th>Datetime</th><th>Station</th><th>Value</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let structure of structures">
+                <td>{{ structure.name }}</td>
+                <td>{{ structure.filePattern }}</td>
+                <td>{{ structure.delimiter }}</td>
+                <td>{{ structure.datetimeColumn }}</td>
+                <td>{{ structure.stationColumn }}</td>
+                <td>{{ structure.valueColumn }}</td>
+                <td class="text-nowrap">
+                  <button type="button" class="btn btn-outline-secondary btn-sm me-2" (click)="editStructure(structure)">Edit</button>
+                  <button type="button" class="btn btn-outline-primary btn-sm" (click)="removeStructure(structure.id)">Remove</button>
+                </td>
+              </tr>
+              <tr *ngIf="structures.length === 0"><td colspan="7"><div class="cdms-empty-state">No AWS data structures configured yet.</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card border-0" *ngIf="activeSection === 'encoding'">
+    <div class="card-header">
+      <div class="cdms-panel-title">Encoding Options</div>
+      <div class="cdms-panel-subtitle">Set modernized encoding, forwarding, and shared-pipeline behavior for live AWS messages and imported records.</div>
+    </div>
+    <div class="card-body">
+      <div class="aws-form-grid">
+        <label>Message format<input type="text" class="form-control" [(ngModel)]="encoding.messageFormat"></label>
+        <label>Station prefix<input type="text" class="form-control" [(ngModel)]="encoding.stationPrefix"></label>
+        <label>Timezone handling<input type="text" class="form-control" [(ngModel)]="encoding.timezoneHandling"></label>
+        <label>Forwarding mode
+          <select class="form-select" [(ngModel)]="encoding.forwardMode">
+            <option value="shared-pipeline">Shared Pipeline</option>
+            <option value="archive-only">Archive Only</option>
+            <option value="forward-and-store">Forward and Store</option>
+          </select>
+        </label>
+      </div>
+      <div class="aws-toggle-row">
+        <label><input type="checkbox" [(ngModel)]="encoding.includeChecksum"> Include checksum on forwarded messages</label>
+        <label><input type="checkbox" [(ngModel)]="encoding.includeStationMetadata"> Include station metadata during forwarding</label>
+      </div>
+      <div class="aws-actions">
+        <button type="button" class="btn btn-primary btn-sm" (click)="saveEncoding()">Save Encoding Options</button>
+      </div>
+    </div>
+  </div>
+</section>
