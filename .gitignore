@@ -26,3 +26,7 @@ front-end/pwa/data/lms/rejected/*.csv
 front-end/pwa/aws-ingestion-layer/.venv/
 front-end/pwa/aws-ingestion-layer/**/__pycache__/
 front-end/pwa/aws-ingestion-layer/**/*.pyc
+
+# Editor swap files
+*.swp
+*.swo
