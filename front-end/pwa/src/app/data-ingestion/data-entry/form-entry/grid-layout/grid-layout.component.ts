@@ -48,7 +48,7 @@ export class GridLayoutComponent implements OnChanges {
   protected observationsDefinitions!: ObservationEntry[][];
 
   /** Holds precomputed visual classes for each rendered grid cell */
-  protected observationCellClasses: (string[] | undefined)[] = [];
+  protected observationCellClasses: string[][] = [];
 
   /** Holds the error message for total validation. Used by the total components of each column */
   protected totalErrorMessage!: string[];
@@ -59,12 +59,7 @@ export class GridLayoutComponent implements OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes["refreshLayout"] && this.refreshLayout) {
-      if (!this.formDefinitions.formMetadata.fields || this.formDefinitions.formMetadata.fields.length < 2 || !this.formDefinitions.formMetadata.fields[1]) {
-        this.rowFieldDefinitions = [];
-        this.colFieldDefinitions = [];
-        this.observationsDefinitions = [];
-        this.totalErrorMessage = [];
-        this.observationCellClasses = [];
+      if (this.formDefinitions.formMetadata.fields.length < 0 || !this.formDefinitions.formMetadata.fields[1]) {
         return;
       }
 
@@ -88,7 +83,7 @@ export class GridLayoutComponent implements OnChanges {
   }
 
   protected get rowHeaderName(): string {
-    return this.formDefinitions.formMetadata.fields[0] ?? '';
+    return this.formDefinitions.formMetadata.fields[0]
   }
 
   /**
@@ -99,18 +94,6 @@ export class GridLayoutComponent implements OnChanges {
    */
   protected getObservationDef(rowIndex: number, colIndex: number): ObservationEntry {
     return this.observationsDefinitions[rowIndex][colIndex];
-  }
-
-  protected trackByFieldDefId(_index: number, fieldDef: FieldEntryDefinition): number {
-    return fieldDef.id;
-  }
-
-  protected trackByRowDefId(_index: number, rowDef: FieldEntryDefinition): number {
-    return rowDef.id;
-  }
-
-  protected trackByColumnObservation(colIndex: number, colDef: FieldEntryDefinition): string {
-    return `${colDef.id}-${colIndex}`;
   }
 
   /**

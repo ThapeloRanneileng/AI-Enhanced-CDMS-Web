@@ -91,8 +91,7 @@ export class ObservationsService {
     const filters: [string, number, number, number, string][] = [];
     const toDate = new Date(entryFormObsQuery.toDate);
     const datetimes: string[] = []
-    const intervalMilliseconds = (entryFormObsQuery.interval > 0 ? entryFormObsQuery.interval : 60) * 60 * 1000;
-    for (let dt = new Date(entryFormObsQuery.fromDate); dt <= toDate; dt = new Date(dt.getTime() + intervalMilliseconds)) {
+    for (let dt = new Date(entryFormObsQuery.fromDate); dt <= toDate; dt.setHours(dt.getHours() + 1)) {
       datetimes.push(dt.toISOString());
     }
 

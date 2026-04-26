@@ -4,7 +4,6 @@ import { CommonModule } from '@angular/common';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { HttpClientModule } from '@angular/common/http';
 import { DragDropModule } from '@angular/cdk/drag-drop';
-import { ScrollingModule } from '@angular/cdk/scrolling';
 //--------------------------------
 
 //--------- components ------------
@@ -57,7 +56,6 @@ const angularModules = [
   FormsModule,
   HttpClientModule,
   DragDropModule,
-  ScrollingModule,
 ];
 
 //--------------------------------

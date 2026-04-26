@@ -8,21 +8,21 @@
                         {{rowHeaderName}}
                     </th>
 
-                    <th *ngFor="let colDef of colFieldDefinitions; trackBy: trackByFieldDefId">
+                    <th *ngFor="let colDef of colFieldDefinitions">
                         <span>{{colDef.name}}</span><span *ngIf="colDef.nameSuperScript" class="app-label-super-script">{{ colDef.nameSuperScript }}</span>
                     </th>
                 </tr>
             </thead>
             <tbody>
                 <!-- row for col name and values -->
-                <tr *ngFor="let rowDef of rowFieldDefinitions; let rowIndex=index; trackBy: trackByRowDefId">
+                <tr *ngFor="let rowDef of rowFieldDefinitions; let rowIndex=index;">
                     <!-- cell for name -->
                     <td class="p-0 m-0 text-center align-middle table-label fw-bold table-row-header">
                         <div class="d-flex ms-3">{{rowDef.name}}</div>
                     </td>
 
                     <!-- cell for values -->
-                    <td class="px-1 py-1 m-0 app-grid-value-cell" *ngFor="let colDef of colFieldDefinitions; let colIndex=index; trackBy: trackByColumnObservation"
+                    <td class="px-1 py-1 m-0 app-grid-value-cell" *ngFor="let colDef of colFieldDefinitions; let colIndex=index;"
                         [ngClass]="observationCellClasses[rowIndex]?.[colIndex]">
                         <div class="app-value-flag-container">
                             <app-value-flag-input [id]="rowDef.id +'-'+ colDef.id"
@@ -44,7 +44,7 @@
                     <td class="p-0 m-0 text-center align-middle table-label fw-bold">
                         <div class="d-flex ms-3">Total</div>
                     </td>
-                    <td class="px-0 py-1 m-0" *ngFor="let colDef of colFieldDefinitions; let colIndex=index; trackBy: trackByColumnObservation">
+                    <td class="px-0 py-1 m-0" *ngFor="let colDef of colFieldDefinitions; let colIndex=index;">
                         <div class="app-value-flag-container">
                             <app-number-input *ngIf="totalErrorMessage" [id]="colDef.id +'-total'"
                                 [borderSize]="userFormSettings.fieldsBorderSize"
