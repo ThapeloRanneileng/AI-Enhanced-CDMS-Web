@@ -42,6 +42,42 @@ export enum UserAppStateEnum {
   QC_ASSESSMENT_REVIEWS = "qc_assessment_reviews",
 }
 
+export type QCReviewWorkflowStatus =
+  | 'pending_review'
+  | 'reviewed'
+  | 'approved_to_final'
+  | 'corrected_and_approved'
+  | 'rejected_escalated';
+
+export interface QCReviewDecisionRecordModel {
+    reviewKey: string;
+    recordId: string;
+    stationId: string;
+    observationDatetime: string;
+    elementCode: string;
+    elementId: number;
+    level: number;
+    interval: number;
+    sourceId: number;
+    sourceName: string | null;
+    originalValue: number | null;
+    correctedValue: number | null;
+    reviewedValue: number | null;
+    workflowStatus: QCReviewWorkflowStatus;
+    finalDecision: 'pending' | 'approved' | 'overridden' | 'escalated';
+    reviewerNotes: string;
+    reviewerUserId: string | null;
+    reviewedAt: string;
+    modelVersion: string | null;
+    engineVersion: string | null;
+    runTimestamp: string | null;
+    submissionFingerprint: string;
+    promotedToFinalStorage: boolean;
+    promotedAt: string | null;
+    promotionError: string | null;
+    sourceReviewRecordPresent: boolean;
+}
+
 export interface AppComponentState {
     name: UserAppStateEnum;
     parameters: any;
@@ -88,13 +124,14 @@ export class AppDatabase extends Dexie {
     userSettings!: Table<AppComponentState, string>;
     stationsSearchHistory!: Table<StationSearchHistoryModel, string>;
     elementsSearchHistory!: Table<ElementSearchHistoryModel, string>;
+    qcReviewDecisions!: Table<QCReviewDecisionRecordModel, string>;
     //--------------------------------------
 
     constructor() {
         // Database name
         super('climsoft_preview_db');
 
-        this.version(1).stores({
+        this.version(2).stores({
             metadataModificationLog: 'metadataName',
             organisations: `id, name`,
             networkAffiliations: `id, name`,
@@ -119,6 +156,7 @@ export class AppDatabase extends Dexie {
             userSettings: `name`,
             stationsSearchHistory: `name`,
             elementsSearchHistory: `name`,
+            qcReviewDecisions: `reviewKey, recordId, stationId, observationDatetime, workflowStatus, finalDecision, sourceId, [stationId+observationDatetime+elementId+sourceId]`,
         });
     }
 

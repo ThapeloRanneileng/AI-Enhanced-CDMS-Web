@@ -1,39 +1,66 @@
-<div class="bg-one"></div>
-<div class="container vh-100 d-flex justify-content-center align-items-center">
-    <div class="row justify-content-center w-100">
-        <div class="col-md-6">
-            <div class="card border-0">
-                <div class="card-header border-0"> CLIMSOFT WEB <!--  TODO Climsoft logo --> </div>
-                <div class="card-body">
-                    <div class="service-head">
-                        <div class="service-title">Log in</div>
-                        <div class="service-body">
-                            To Access Climsoft
-                        </div>
-
-                    </div>
-                    <div *ngIf="errorMessage" class="alert alert-danger">{{errorMessage}}</div>
-                    <form (ngSubmit)="login()">
-                        <div class="mb-3">
-                            <label for="email" class="form-label">Email</label>
-                            <input type="email" class="form-control" id="email" name="email" [(ngModel)]="email"
-                                required>
-                        </div>
-                        <div class="mb-3">
-                            <label for="password" class="form-label">Password</label>
-                            <input type="password" class="form-control" id="password" name="password"
-                                [(ngModel)]="password" required>
-                        </div>
-                        <!-- <div class="d-flex justify-content-end">
-                            <a [href]="'/password-reset'">Forgot password</a>
-                        </div> -->
-                        <div class="d-flex justify-content-end">
-                            <button type="submit" class="btn btn-outline-secondary">Login</button>
-                        </div>
-
-                    </form>
+<main class="login-shell">
+    <section class="login-card">
+        <div class="brand-panel">
+            <div class="brand-mark">
+                <i class="bi bi-cloud-sun"></i>
+            </div>
+            <span class="eyebrow">{{ appBranding.name }}</span>
+            <h1>{{ appBranding.description }}</h1>
+            <p>Sign in to manage climate observations, QC workflows, reporting, and station data.</p>
+            <div class="weather-strip">
+                <div>
+                    <i class="bi bi-thermometer-half"></i>
+                    <span>Observations</span>
+                </div>
+                <div>
+                    <i class="bi bi-shield-check"></i>
+                    <span>QC</span>
+                </div>
+                <div>
+                    <i class="bi bi-file-earmark-bar-graph"></i>
+                    <span>Reports</span>
                 </div>
             </div>
         </div>
-    </div>
-</div>
+
+        <div class="form-panel">
+            <div class="form-heading">
+                <span class="eyebrow">Welcome back</span>
+                <h2>Sign in</h2>
+            </div>
+
+            <div *ngIf="errorMessage" class="login-alert">
+                <i class="bi bi-exclamation-circle"></i>
+                {{ errorMessage }}
+            </div>
+
+            <form (ngSubmit)="login()" class="login-form">
+                <label for="email">Email / Username</label>
+                <div class="input-shell">
+                    <i class="bi bi-person"></i>
+                    <input type="text" id="email" name="email" [(ngModel)]="email" autocomplete="username" required>
+                </div>
+
+                <label for="password">Password</label>
+                <div class="input-shell">
+                    <i class="bi bi-lock"></i>
+                    <input type="password" id="password" name="password" [(ngModel)]="password"
+                        autocomplete="current-password" required>
+                </div>
+
+                <div class="form-options">
+                    <label class="remember-option">
+                        <input type="checkbox" name="rememberMe" [(ngModel)]="rememberMe">
+                        <span>Remember me</span>
+                    </label>
+                    <a routerLink="/password-reset">Forgot password?</a>
+                </div>
+
+                <button type="submit" class="sign-in-button">
+                    Sign in
+                    <i class="bi bi-arrow-right"></i>
+                </button>
+            </form>
+        </div>
+    </section>
+</main>

@@ -6,6 +6,7 @@ import { AppAuthService } from '../../app-auth.service';
 import { ObservationsService } from 'src/app/data-ingestion/services/observations.service';
 import { LoggedInUserModel } from 'src/app/admin/users/models/logged-in-user.model';
 import { MainMenuNameEnum, MenuItem, MenuItemsUtil, SubMenuNameEnum } from './menu-items';
+import { APP_BRANDING } from '../app-branding';
 
 @Component({
   selector: 'app-home',
@@ -13,6 +14,7 @@ import { MainMenuNameEnum, MenuItem, MenuItemsUtil, SubMenuNameEnum } from './me
   styleUrls: ['./home.component.scss']
 })
 export class HomeComponent implements OnInit, OnDestroy {
+  protected readonly appBranding = APP_BRANDING;
   protected featuresNavItems: MenuItem[] = [];
   protected openSideNav: boolean = false;
   protected pageHeaderName: string = '';

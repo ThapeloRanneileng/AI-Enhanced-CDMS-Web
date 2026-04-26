@@ -1,7 +1,9 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
+import { Title } from '@angular/platform-browser';
 import { Subscription } from 'rxjs';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AppAuthService } from './app-auth.service';
+import { APP_BRANDING } from './core/app-branding';
 
 @Component({
   selector: 'app-root',
@@ -14,11 +16,13 @@ export class AppComponent implements OnInit, OnDestroy {
 
   constructor(
     private authService: AppAuthService,
+    private title: Title,
     private router: Router,
     private activatedRoute: ActivatedRoute) {
   }
 
   ngOnInit(): void {
+    this.title.setTitle(APP_BRANDING.name);
     this.initialiseUser();
   }
 
