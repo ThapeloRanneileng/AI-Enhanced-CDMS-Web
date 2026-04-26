@@ -2,6 +2,7 @@
 import { NgModule } from '@angular/core';
 import { ImportEntryDialogComponent } from './import-entry/import-upload-dialog/import-entry.component';
 import { StationFormSelectionComponent } from './data-entry/station-form-selection/station-form-selection.component';
+import { FormPlaceholderComponent } from './data-entry/form-placeholder/form-placeholder.component';
 import { FormEntryComponent } from './data-entry/form-entry/form-entry.component';
 import { UserFormSettingsComponent } from './data-entry/form-entry/user-form-settings/user-form-settings.component';
 import { GridLayoutComponent } from './data-entry/form-entry/grid-layout/grid-layout.component';
@@ -11,6 +12,7 @@ import { ImportSelectionComponent } from './import-entry/import-source-selection
 import { DataCorrectionComponent } from './data-correction/data-correction.component'; 
 import { MissingDataComponent } from './missing-data/missing-data.component';
 import { DeletedDataComponent } from './deleted-data/deleted-data.component';
+import { AwsRealTimeComponent } from './aws-real-time/aws-real-time.component';
 import { DataIngestionRoutingModule } from './data-ingestion-routing.module';
 import { SharedModule } from '../shared/shared.module';
 import { MetadataModule } from '../metadata/metadata.module';  
@@ -20,6 +22,7 @@ import { ObservationsModule } from '../observations/observations.module';
   declarations: [
     ImportEntryDialogComponent,
     StationFormSelectionComponent,
+    FormPlaceholderComponent,
     FormEntryComponent,
     UserFormSettingsComponent,
     GridLayoutComponent,
@@ -29,6 +32,7 @@ import { ObservationsModule } from '../observations/observations.module';
     DataCorrectionComponent,   
     MissingDataComponent,
     DeletedDataComponent,
+    AwsRealTimeComponent,
   ],
   imports: [
     DataIngestionRoutingModule,

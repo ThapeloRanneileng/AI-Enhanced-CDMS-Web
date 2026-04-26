@@ -1,17 +1,472 @@
-<div *ngIf="importSources" class="card border-0">
-    <div class="card-header d-flex justify-content-end align-items-center px-1 py-0">
-        <div class="mb-1 d-flex">
-            <!-- <button type="button" class="btn btn-outline-secondary btn-sm" (click)="onSearch()">
-                Search
-            </button> -->
+<section class="cdms-page-shell manual-import">
+  <div class="cdms-page-header">
+    <div>
+      <span class="eyebrow">AI-Enhanced CDMS</span>
+      <h2>Manual Import</h2>
+      <p>Bring station metadata and observation files into the shared observation workflow with a consistent review-ready import experience.</p>
+    </div>
+    <div class="cdms-header-meta">
+      <span class="cdms-header-chip">{{ importOptions.length }} import paths</span>
+      <span class="cdms-header-chip" *ngIf="selectedOption === 'station-metadata'">Station metadata</span>
+      <span class="cdms-header-chip" *ngIf="selectedOption === 'observation-data'">Observation data</span>
+    </div>
+  </div>
+
+<div class="manual-import">
+  <div class="mb-3">
+    <div class="row g-2">
+      <div class="col-md-6 col-xl-4" *ngFor="let option of importOptions">
+        <button type="button" class="manual-import-option text-start w-100"
+          [class.active]="selectedOption === option.id" (click)="selectOption(option.id)">
+          <div class="fw-semibold">{{ option.name }}</div>
+          <div class="small text-muted">{{ option.description }}</div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="selectedOption === 'station-metadata'" class="station-import">
+    <div class="section-title">Station Metadata CSV Import</div>
+
+    <div class="row g-3 align-items-end mb-3">
+      <div class="col-lg-7">
+        <label for="manual-station-file" class="form-label">CSV or text file</label>
+        <input id="manual-station-file" class="form-control" type="file" accept=".csv,.txt,text/csv,text/plain"
+          (change)="onStationFileSelected($event)">
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <label for="manual-station-delimiter" class="form-label">Delimiter</label>
+        <select id="manual-station-delimiter" class="form-select" [(ngModel)]="stationDelimiter"
+          (change)="onStationDelimiterChange()">
+          <option value=",">Comma (,)</option>
+          <option value=";">Semicolon (;)</option>
+          <option value="	">Tab</option>
+          <option value="|">Pipe (|)</option>
+        </select>
+      </div>
+      <div class="col-sm-6 col-lg-2">
+        <button type="button" class="btn btn-primary w-100" [disabled]="!canImportStations()" (click)="importStations()">
+          {{ stationImporting ? 'Importing...' : 'Import' }}
+        </button>
+      </div>
+    </div>
+
+    <div *ngIf="stationFileName" class="small text-muted mb-2">
+      Selected file: {{ stationFileName }}
+    </div>
+
+    <div *ngIf="stationParseError" class="alert alert-warning py-2">{{ stationParseError }}</div>
+    <div *ngIf="stationImportError" class="alert alert-danger py-2">{{ stationImportError }}</div>
+
+    <div *ngIf="stationHeaders.length" class="row g-3">
+      <div class="col-xl-5">
+        <div class="panel">
+          <div class="panel-heading">
+            <span>Column Mapping</span>
+            <span class="small text-muted">{{ stationParsedRows.length }} rows detected</span>
+          </div>
+
+          <div class="mapping-row" *ngFor="let field of stationFields">
+            <label [for]="'station-map-' + field.id">
+              {{ field.label }}
+              <span *ngIf="field.required" class="text-danger">*</span>
+            </label>
+            <select [id]="'station-map-' + field.id" class="form-select form-select-sm"
+              [ngModel]="stationColumnMapping[field.id] || ''" (ngModelChange)="setStationMapping(field.id, $event)">
+              <option value="">Not imported</option>
+              <option *ngFor="let header of stationHeaders" [value]="header">{{ header }}</option>
+            </select>
+          </div>
+
+          <div *ngIf="!stationColumnMapping.id || !stationColumnMapping.name" class="alert alert-info py-2 mt-3 mb-0">
+            Map Station ID and Station Name before importing.
+          </div>
         </div>
+      </div>
+
+      <div class="col-xl-7">
+        <div class="panel">
+          <div class="panel-heading">
+            <span>Preview</span>
+            <span class="small text-muted">Headers and first rows</span>
+          </div>
+
+          <div class="table-responsive preview-table">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead>
+                <tr>
+                  <th class="text-nowrap">Row</th>
+                  <th class="text-nowrap" *ngFor="let header of stationHeaders">{{ header }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let row of stationPreviewRows">
+                  <td class="text-muted">{{ row.rowNumber }}</td>
+                  <td *ngFor="let header of stationHeaders">{{ row.values[header] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div class="card-body px-0">
-        <app-table-view [clickable]="true"
-            [columnsData]="[ {id: 'name', name: 'Name'} , {id: 'description', name: 'Description'} ]"
-            [rowsData]="importSources" (rowDataClicked)="onSourceClick($event)" />
+    <div *ngIf="stationResult" class="result-panel mt-3">
+      <div class="row g-2">
+        <div class="col-md-4">
+          <div class="result-stat">
+            <div class="small text-muted">Total rows</div>
+            <div class="fs-5 fw-semibold">{{ stationResult.totalRows }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="result-stat imported">
+            <div class="small text-muted">Imported</div>
+            <div class="fs-5 fw-semibold">{{ stationResult.importedRows }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="result-stat rejected">
+            <div class="small text-muted">Rejected</div>
+            <div class="fs-5 fw-semibold">{{ stationResult.rejectedRows.length }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="stationResult.rejectedRows.length" class="mt-3">
+        <div class="fw-semibold mb-2">Rejected Rows</div>
+        <div class="table-responsive preview-table">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Row</th>
+                <th>Station ID</th>
+                <th>Reasons</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let rejected of stationResult.rejectedRows">
+                <td>{{ rejected.rowNumber }}</td>
+                <td>{{ rejected.stationId || '' }}</td>
+                <td>{{ rejected.reasons.join('; ') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
+  </div>
+
+  <div *ngIf="selectedOption === 'observation-data'" class="observation-import">
+    <div class="section-title">Observation Data CSV Import</div>
+
+    <div class="row g-3 align-items-end mb-3">
+      <div class="col-lg-7">
+        <label for="manual-observation-file" class="form-label">CSV or text file</label>
+        <input id="manual-observation-file" class="form-control" type="file" accept=".csv,.txt,text/csv,text/plain"
+          (change)="onObservationFileSelected($event)">
+      </div>
+      <div class="col-sm-6 col-lg-3">
+        <label for="manual-observation-delimiter" class="form-label">Delimiter</label>
+        <select id="manual-observation-delimiter" class="form-select" [(ngModel)]="observationDelimiter"
+          (change)="onObservationDelimiterChange()">
+          <option value=",">Comma (,)</option>
+          <option value=";">Semicolon (;)</option>
+          <option value="	">Tab</option>
+          <option value="|">Pipe (|)</option>
+        </select>
+      </div>
+      <div class="col-sm-6 col-lg-2">
+        <button type="button" class="btn btn-primary w-100" [disabled]="!canImportObservations()"
+          (click)="importObservations()">
+          {{ observationImporting ? 'Importing...' : 'Import' }}
+        </button>
+      </div>
+    </div>
+
+    <div *ngIf="observationFileName" class="small text-muted mb-2">
+      Selected file: {{ observationFileName }}
+    </div>
+
+    <div *ngIf="observationParseError" class="alert alert-warning py-2">{{ observationParseError }}</div>
+    <div *ngIf="observationImportError" class="alert alert-danger py-2">{{ observationImportError }}</div>
+
+    <div *ngIf="observationHeaders.length" class="row g-3">
+      <div class="col-xl-5">
+        <div class="panel">
+          <div class="panel-heading">
+            <span>Column Mapping</span>
+            <span class="small text-muted">{{ observationParsedRows.length }} rows detected</span>
+          </div>
+
+          <div class="mapping-row" *ngFor="let field of observationFields">
+            <label [for]="'observation-map-' + field.id">
+              {{ field.label }}
+              <span *ngIf="field.required" class="text-danger">*</span>
+            </label>
+            <select [id]="'observation-map-' + field.id" class="form-select form-select-sm"
+              [ngModel]="observationColumnMapping[field.id] || ''"
+              (ngModelChange)="setObservationMapping(field.id, $event)">
+              <option value="">Not imported</option>
+              <option *ngFor="let header of observationHeaders" [value]="header">{{ header }}</option>
+            </select>
+          </div>
+
+          <div
+            *ngIf="!observationColumnMapping.stationId || !observationColumnMapping.element || !observationColumnMapping.observationDatetime || !observationColumnMapping.value"
+            class="alert alert-info py-2 mt-3 mb-0">
+            Map Station ID, Element, Observation Datetime, and Value before importing.
+          </div>
+        </div>
+      </div>
+
+      <div class="col-xl-7">
+        <div class="panel">
+          <div class="panel-heading">
+            <span>Preview</span>
+            <span class="small text-muted">Headers and first rows</span>
+          </div>
+
+          <div class="table-responsive preview-table">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead>
+                <tr>
+                  <th class="text-nowrap">Row</th>
+                  <th class="text-nowrap" *ngFor="let header of observationHeaders">{{ header }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let row of observationPreviewRows">
+                  <td class="text-muted">{{ row.rowNumber }}</td>
+                  <td *ngFor="let header of observationHeaders">{{ row.values[header] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div *ngIf="observationResult" class="result-panel mt-3">
+      <div class="row g-2">
+        <div class="col-md-4">
+          <div class="result-stat">
+            <div class="small text-muted">Total rows</div>
+            <div class="fs-5 fw-semibold">{{ observationResult.totalRows }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="result-stat imported">
+            <div class="small text-muted">Imported</div>
+            <div class="fs-5 fw-semibold">{{ observationResult.importedRows }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="result-stat rejected">
+            <div class="small text-muted">Rejected</div>
+            <div class="fs-5 fw-semibold">{{ observationResult.rejectedRows.length }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="observationResult.rejectedRows.length" class="mt-3">
+        <div class="fw-semibold mb-2">Rejected Rows</div>
+        <div class="table-responsive preview-table">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Row</th>
+                <th>Station ID</th>
+                <th>Element</th>
+                <th>Reasons</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let rejected of observationResult.rejectedRows">
+                <td>{{ rejected.rowNumber }}</td>
+                <td>{{ rejected.stationId || '' }}</td>
+                <td>{{ rejected.element || '' }}</td>
+                <td>{{ rejected.reasons.join('; ') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div *ngIf="selectedOption === 'aws-import'" class="aws-import">
+    <div class="section-title">AWS Import</div>
+    <div class="section-subtitle">Modernized file-based AWS observation import for the shared observation pipeline.</div>
+
+    <div class="panel">
+      <div class="panel-heading">
+        <span>AWS File Setup</span>
+        <span class="small text-muted">Parse, preview, map, and import AWS observations</span>
+      </div>
+
+      <div class="row g-3 align-items-end">
+        <div class="col-lg-4">
+          <label for="aws-import-file" class="form-label">AWS data file</label>
+          <input id="aws-import-file" class="form-control" type="file" accept=".csv,.txt,text/csv,text/plain"
+            (change)="onAwsFileSelected($event)">
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label for="aws-import-delimiter" class="form-label">Delimiter</label>
+          <select id="aws-import-delimiter" class="form-select" [(ngModel)]="awsDelimiter" (change)="onAwsDelimiterChange()">
+            <option value=",">Comma (,)</option>
+            <option value=";">Semicolon (;)</option>
+            <option value="	">Tab</option>
+            <option value="|">Pipe (|)</option>
+            <option value="__other__">Other</option>
+          </select>
+        </div>
+        <div class="col-sm-6 col-lg-2" *ngIf="awsDelimiter === '__other__'">
+          <label for="aws-import-custom-delimiter" class="form-label">Custom delimiter</label>
+          <input id="aws-import-custom-delimiter" class="form-control" type="text" maxlength="3"
+            [(ngModel)]="awsCustomDelimiter" (ngModelChange)="onAwsDelimiterChange()">
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label for="aws-import-start-row" class="form-label">Start row</label>
+          <input id="aws-import-start-row" class="form-control" type="number" min="1"
+            [(ngModel)]="awsStartRow" (ngModelChange)="onAwsDelimiterChange()">
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label class="form-label">Station override</label>
+          <app-station-selector-single [id]="'aws_import_station'" [label]="''"
+            [(selectedId)]="awsStationId" />
+        </div>
+        <div class="col-sm-6 col-lg-2">
+          <label for="aws-import-missing-flag" class="form-label">Missing data flag</label>
+          <input id="aws-import-missing-flag" class="form-control" type="text" [(ngModel)]="awsMissingDataFlag">
+        </div>
+      </div>
+
+      <div *ngIf="awsFileName" class="small text-muted mt-2">Selected file: {{ awsFileName }}</div>
+      <div *ngIf="awsParseError" class="alert alert-warning py-2 mt-3">{{ awsParseError }}</div>
+      <div *ngIf="awsImportError" class="alert alert-danger py-2 mt-3">{{ awsImportError }}</div>
+    </div>
+
+    <div *ngIf="awsHeaders.length" class="row g-3 mt-1">
+      <div class="col-xl-5">
+        <div class="panel">
+          <div class="panel-heading">
+            <span>Column Header Mapping</span>
+            <span class="small text-muted">{{ awsParsedRows.length }} rows parsed</span>
+          </div>
+
+          <div class="spec-toolbar">
+            <input type="text" class="form-control form-control-sm" placeholder="Mapping spec name"
+              [(ngModel)]="awsMappingSpecName">
+            <button type="button" class="btn btn-outline-secondary btn-sm" (click)="saveAwsSpec()">Save Header Specs</button>
+          </div>
+
+          <div class="spec-toolbar">
+            <select class="form-select form-select-sm" [(ngModel)]="selectedAwsSpecKey">
+              <option value="">Load saved header specs</option>
+              <option *ngFor="let spec of savedAwsSpecs" [value]="spec.key">{{ spec.label }}</option>
+            </select>
+            <button type="button" class="btn btn-outline-secondary btn-sm" [disabled]="!selectedAwsSpecKey" (click)="loadAwsSpec()">Load Header Specs</button>
+          </div>
+
+          <div class="mapping-row" *ngFor="let field of awsFields">
+            <label [for]="'aws-map-' + field.id">
+              {{ field.label }}
+              <span *ngIf="field.required" class="text-danger">*</span>
+            </label>
+            <select [id]="'aws-map-' + field.id" class="form-select form-select-sm"
+              [ngModel]="awsColumnMapping[field.id] || ''" (ngModelChange)="setAwsMapping(field.id, $event)">
+              <option value="">Not mapped</option>
+              <option *ngFor="let header of awsHeaders" [value]="header">{{ header }}</option>
+            </select>
+          </div>
+
+          <div class="alert alert-info py-2 mt-3 mb-0"
+            *ngIf="!awsColumnMapping.element || !awsColumnMapping.observationDatetime || !awsColumnMapping.value || (!awsColumnMapping.stationId && !awsStationId)">
+            Map Element, Observation Datetime, Value, and either Station ID or Station override before importing.
+          </div>
+        </div>
+      </div>
+
+      <div class="col-xl-7">
+        <div class="panel">
+          <div class="panel-heading">
+            <span>Parsed Data Preview</span>
+            <span class="small text-muted">View data before import</span>
+          </div>
+
+          <div class="table-responsive preview-table">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead>
+                <tr>
+                  <th class="text-nowrap">Row</th>
+                  <th class="text-nowrap" *ngFor="let header of awsHeaders">{{ header }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let row of awsPreviewRows">
+                  <td class="text-muted">{{ row.rowNumber }}</td>
+                  <td *ngFor="let header of awsHeaders">{{ row.values[header] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="aws-actions mt-3">
+            <button type="button" class="btn btn-primary" [disabled]="!canImportAws()" (click)="importAwsObservations()">
+              {{ awsImporting ? 'Importing...' : 'Load / Import Data' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div *ngIf="awsResult" class="result-panel mt-3">
+      <div class="row g-2">
+        <div class="col-md-4">
+          <div class="result-stat">
+            <div class="small text-muted">Total rows</div>
+            <div class="fs-5 fw-semibold">{{ awsResult.totalRows }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="result-stat imported">
+            <div class="small text-muted">Imported</div>
+            <div class="fs-5 fw-semibold">{{ awsResult.importedRows }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="result-stat rejected">
+            <div class="small text-muted">Rejected</div>
+            <div class="fs-5 fw-semibold">{{ awsResult.rejectedRows.length }}</div>
+          </div>
+        </div>
+      </div>
+
+      <div *ngIf="awsResult.rejectedRows.length" class="mt-3">
+        <div class="fw-semibold mb-2">Rejected Rows</div>
+        <div class="table-responsive preview-table">
+          <table class="table table-sm table-bordered align-middle mb-0">
+            <thead>
+              <tr>
+                <th>Row</th>
+                <th>Station ID</th>
+                <th>Element</th>
+                <th>Reasons</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let rejected of awsResult.rejectedRows">
+                <td>{{ rejected.rowNumber }}</td>
+                <td>{{ rejected.stationId || awsStationId || '' }}</td>
+                <td>{{ rejected.element || '' }}</td>
+                <td>{{ rejected.reasons.join('; ') }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-
-<app-import-entry #dlgImportEntry />
+</section>

@@ -23,6 +23,7 @@ export enum MainMenuNameEnum {
 export enum SubMenuNameEnum {
     DATA_ENTRY = 'Data Entry',
     MANUAL_IMPORT = 'Manual Import',
+    AWS_REAL_TIME = 'AWS Real Time',
     //SCHEDULED_IMPORT = 'Scheduled Import',
     DATA_CORRECTION = 'Data Correction',
     DELETED_DATA = 'Deleted Data',
@@ -75,6 +76,10 @@ export class MenuItemsUtil {
                 {
                     name: SubMenuNameEnum.MANUAL_IMPORT,
                     url: '/manual-import-selection',
+                },
+                {
+                    name: SubMenuNameEnum.AWS_REAL_TIME,
+                    url: '/aws-real-time',
                 },
                 // {
                 //     name: SubMenuNameEnum.SCHEDULED_IMPORT,
