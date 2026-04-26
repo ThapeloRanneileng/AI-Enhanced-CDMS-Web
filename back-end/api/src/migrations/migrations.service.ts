@@ -20,7 +20,7 @@ import { DataSource } from 'typeorm';
 
 @Injectable()
 export class MigrationsService {
-  private readonly SUPPORTED_DB_VERSION: string = '0.0.6'; // TODO. Should come from a versioning file. 
+  private readonly SUPPORTED_DB_VERSION: string = '0.0.7'; // TODO. Should come from a versioning file. 
   private readonly logger = new Logger(MigrationsService.name);
 
   constructor(
@@ -92,6 +92,7 @@ export class MigrationsService {
     await this.seedMetadata();
     await this.seedGeneralSettings();
     await this.createObservationAnomalyAssessmentsTable();
+    await this.createPaperArchivesTable();
   }
 
   private async seedTriggers() {
@@ -275,6 +276,43 @@ export class MigrationsService {
     `);
 
     this.logger.log('observation anomaly assessments table ensured');
+  }
+
+  private async createPaperArchivesTable() {
+    await this.dataSource.query(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'paper_archives_status_enum') THEN
+          CREATE TYPE paper_archives_status_enum AS ENUM ('active', 'needs_review');
+        END IF;
+      END $$;
+    `);
+
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS paper_archives (
+        id SERIAL PRIMARY KEY,
+        station_id VARCHAR NULL,
+        source_id INT NULL,
+        observation_date DATE NULL,
+        observation_hour INT NULL,
+        original_file_name VARCHAR NOT NULL,
+        stored_file_name VARCHAR NOT NULL UNIQUE,
+        archive_path VARCHAR NOT NULL,
+        checksum VARCHAR NULL,
+        notes VARCHAR NULL,
+        status paper_archives_status_enum NOT NULL DEFAULT 'active',
+        entry_user_id INT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        entry_date_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_paper_archives_station_id" ON paper_archives (station_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_paper_archives_source_id" ON paper_archives (source_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_paper_archives_observation_date" ON paper_archives (observation_date);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_paper_archives_status" ON paper_archives (status);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_paper_archives_entry_date_time" ON paper_archives (entry_date_time);`);
+
+    this.logger.log('paper archives table ensured');
   }
 
 }

@@ -9,9 +9,9 @@ export const DEFAULT_GENERAL_SETTINGS: ViewGeneralSettingModel[] = [
         name: 'Climsoft boundary',
         description: 'The default geographical boundary coordinates that Climsoft manages data and zoom level that the map will center on when it is first loaded.',
         parameters: {
-            longitude: 37.59162,
-            latitude: 0.36726,
-            zoomLevel: 6
+            longitude: 28.23,
+            latitude: -29.61,
+            zoomLevel: 7
         } as ClimsoftBoundaryDto
     },
     {
