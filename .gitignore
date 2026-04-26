@@ -16,3 +16,13 @@ temp/
 .idea/
 back-end/api/node_modules/
 front-end/pwa/node_modules/
+
+# LMS local raw data and generated outputs
+front-end/pwa/data/lms/observations/*.csv
+front-end/pwa/data/lms/outputs/
+front-end/pwa/data/lms/rejected/*.csv
+
+# Python virtual environment and cache
+front-end/pwa/aws-ingestion-layer/.venv/
+front-end/pwa/aws-ingestion-layer/**/__pycache__/
+front-end/pwa/aws-ingestion-layer/**/*.pyc

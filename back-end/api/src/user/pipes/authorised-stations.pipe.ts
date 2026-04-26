@@ -38,6 +38,27 @@ export class AuthorisedStationsPipe implements PipeTransform {
       throw new BadRequestException('Could not determine how to authorize stations');
     }
 
+    if (this.isObservationQueryMetatype(metadata.metatype)) {
+      const routePath = this.request.route.path;
+      if (routePath === '/observations' || routePath === '/observations/count') {
+        return this.handleMonitoringViewObservationQueryDTO(value as ViewObservationQueryDTO, user.permissions);
+      } else if (routePath === '/observations/correction-data' || routePath === '/observations/count-correction-data') {
+        return this.handleCorrectionViewObservationQueryDTO(value as ViewObservationQueryDTO, user.permissions);
+      } else if (
+        routePath === '/qc-check/count'
+        || routePath === '/qc-check/count'
+        || routePath === '/qc-check/perform-qc'
+        || routePath === '/review-workspace'
+        || routePath === '/review-workspace/count'
+        || routePath === '/observation-anomaly-assessments/review-workspace'
+        || routePath === '/observation-anomaly-assessments/review-workspace/count'
+      ) {
+        return this.handleQualityControlQueryDTO(value as ViewObservationQueryDTO, user.permissions);
+      } else {
+        throw new BadRequestException('Observations route path not authorised');
+      }
+    }
+
     // Handle different types of metatype
     switch (metadata.metatype.name) {
       case 'Array':
@@ -67,16 +88,6 @@ export class AuthorisedStationsPipe implements PipeTransform {
         return this.handleCreateObservationQueryDto(value as EntryFormObservationQueryDto, user.permissions);
       case CreateObservationDto.name:
         return this.handleCreateObservationQueryDto(value as CreateObservationDto, user.permissions);
-      case ViewObservationQueryDTO.name:
-        if (this.request.route.path === '/observations' || this.request.route.path === '/observations/count') {
-          return this.handleMonitoringViewObservationQueryDTO(value as ViewObservationQueryDTO, user.permissions)
-        } else if (this.request.route.path === '/observations/correction-data' || this.request.route.path === '/observations/count-correction-data') {
-          return this.handleCorrectionViewObservationQueryDTO(value as ViewObservationQueryDTO, user.permissions);
-        } else if (this.request.route.path === '/qc-check/count' || this.request.route.path === '/qc-check/count' || this.request.route.path === '/qc-check/perform-qc') {
-          return this.handleQualityControlQueryDTO(value as ViewObservationQueryDTO, user.permissions);
-        } else {
-          throw new BadRequestException('Observations route path not authorised');
-        }
       case DeleteObservationDto.name:
         return this.handleCreateObservationQueryDto(value as DeleteObservationDto, user.permissions);
       case StationStatusQueryDto.name:
@@ -218,5 +229,9 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private allAreAuthorisedStations(requestedIds: string[], authorisedIds: string[]): boolean {
     return requestedIds.every(id => authorisedIds.includes(id));
+  }
+
+  private isObservationQueryMetatype(metatype: Function): boolean {
+    return metatype === ViewObservationQueryDTO || metatype.prototype instanceof ViewObservationQueryDTO;
   }
 }
