@@ -250,7 +250,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
   protected queryLmsAiOutputs(): void {
     this.lmsLoading = true;
     this.lmsErrorMessage = '';
-    this.lmsAiService.ensemble({
+    this.lmsAiService.qcAssessments({
       stationId: this.lmsQuery.stationId || undefined,
       stationName: this.lmsQuery.stationName || undefined,
       elementCode: this.lmsQuery.elementCode || undefined,

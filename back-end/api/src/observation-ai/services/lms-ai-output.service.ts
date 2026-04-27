@@ -16,6 +16,7 @@ export interface LmsAiQuery {
   severity?: string;
   reviewSource?: string;
   modelName?: string;
+  prompt?: string;
   limit?: string | number;
   offset?: string | number;
 }
@@ -108,6 +109,34 @@ export class LmsAiOutputService {
     return this.queryCsv(this.knownFiles.qcReview, query);
   }
 
+  public getQcAssessments(query: LmsAiQuery) {
+    const handoff = this.readCsv(this.knownFiles.qcReview);
+    const ensemble = this.readCsv(this.knownFiles.ensemble);
+    const explanations = this.readCsv(this.knownFiles.genaiReviewerExplanations);
+    const manifest = this.readJson(this.knownFiles.manifest);
+    const provider = this.normalizeProvider(manifest.data?.genaiProvider);
+    const explanationMap = new Map<string, Record<string, string>>();
+    for (const row of explanations.rows) {
+      explanationMap.set(this.getAssessmentJoinKey(row), row);
+    }
+
+    const mergedRows = [...handoff.rows, ...ensemble.rows]
+      .map(row => this.withAssessmentFields(row, explanationMap.get(this.getAssessmentJoinKey(row)), provider))
+      .filter((row, index, rows) => rows.findIndex(candidate => this.getAssessmentJoinKey(candidate) === this.getAssessmentJoinKey(row)) === index);
+
+    const filteredRows = this.filterRows(mergedRows, query);
+    return {
+      ...this.pageRows(filteredRows, query),
+      provider,
+      evidenceFiles: [
+        this.getFileInfo(this.knownFiles.qcReview),
+        this.getFileInfo(this.knownFiles.ensemble),
+        this.getFileInfo(this.knownFiles.genaiReviewerExplanations),
+      ],
+      missing: !handoff.exists && !ensemble.exists,
+    };
+  }
+
   public getEnsemble(query: LmsAiQuery) {
     return this.queryCsv(this.knownFiles.ensemble, query);
   }
@@ -138,6 +167,62 @@ export class LmsAiOutputService {
     return this.queryCsv(this.knownFiles.genaiReviewerExplanations, query);
   }
 
+  public getAgentInsights(query: LmsAiQuery) {
+    const prompt = `${query.prompt ?? 'model performance'}`.toLowerCase();
+    const manifest = this.readJson(this.knownFiles.manifest);
+    const modelSummary = this.readJson(this.knownFiles.modelSummary);
+    const genAiSummary = this.getGenAiSummary();
+    const supervisor = this.readMarkdown(this.knownFiles.supervisorSummary);
+    const handoff = this.getQcAssessments({ ...query, limit: query.limit ?? 50, offset: 0 });
+    const provider = this.normalizeProvider(genAiSummary.provider ?? manifest.data?.genaiProvider);
+    const modelMetrics = modelSummary.data?.modelMetrics ?? {};
+    const topStations = [...(modelSummary.data?.stationAnomalyRates ?? [])]
+      .sort((left, right) => Number(right.anomalyRate) - Number(left.anomalyRate))
+      .slice(0, 5);
+    const sections = [
+      ...genAiSummary.sections,
+      ...this.parseMarkdownSections(supervisor.content),
+    ];
+
+    const answerParts: string[] = [];
+    if (prompt.includes('station')) {
+      answerParts.push(`Highest-risk LMS stations are ${topStations.map(row => `${row.stationId} (${this.formatPercent(row.anomalyRate)})`).join(', ') || 'not available'}.`);
+      answerParts.push('Prioritize stations with high anomaly rates and high failed/suspect counts before lower-risk normal rows.');
+    } else if (prompt.includes('reviewer') || prompt.includes('action')) {
+      answerParts.push('Review FAILED rows first, then SUSPECT rows with multiple agreeing models, and compare each value with nearby daily observations and the original LMS source record.');
+      answerParts.push('Do not overwrite values automatically; record reviewer evidence and only correct values after source verification.');
+    } else if (prompt.includes('supervisor')) {
+      answerParts.push(`LMS AI pipeline ${manifest.data?.runId ?? 'latest run'} used ${provider} GenAI assistance and produced ${this.formatNumber(manifest.data?.qcReviewRows)} QC review handoff rows.`);
+      answerParts.push('Supervisor focus should be review throughput, high-risk station follow-up, and confirmation that template/Gemini/Groq provider provenance is visible in reports.');
+    } else if (prompt.includes('wrong') || prompt.includes('automatically')) {
+      answerParts.push('Anomalies are review priorities, not automatic wrong-value decisions. The LMS-trained layer flags values that differ from learned historical station-element patterns.');
+      answerParts.push('Final decisions still require human QC review, source comparison, and documented acceptance, correction, or escalation.');
+    } else {
+      const metricsText = Object.keys(modelMetrics)
+        .map(name => `${name}: ${this.formatNumber(modelMetrics[name]?.anomalyCount)} anomalies, ${this.formatPercent(modelMetrics[name]?.anomalyRate)}`)
+        .join('; ');
+      answerParts.push(`The current LMS-trained model layer scored historical LMS observations with these model results: ${metricsText || 'model metrics not available'}.`);
+      answerParts.push(`The ensemble handoff has ${this.formatNumber(manifest.data?.qcReviewRows)} QC review rows from ${this.formatNumber(manifest.data?.totalPredictionRows)} prediction rows.`);
+    }
+
+    const evidence = [
+      `Provider: ${provider}`,
+      `Run ID: ${manifest.data?.runId ?? 'not available'}`,
+      `Training source: LMS historical climate data`,
+      `Clean training rows: ${this.formatNumber(manifest.data?.totalCleanRows)}`,
+      `QC handoff rows: ${this.formatNumber(manifest.data?.qcReviewRows)}`,
+      ...sections.slice(0, 2).map(section => `${section.title}: ${section.lines.slice(0, 2).join(' ')}`),
+      ...handoff.rows.slice(0, 3).map(row => `${row.stationId} ${row.elementCode} ${row.observationDatetime}: ${row.finalDecision || row.outcome} (${row.severity})`),
+    ].filter(item => item.trim().length > 0);
+
+    return {
+      provider,
+      answer: answerParts.join(' '),
+      evidence,
+      recommendedActions: this.getRecommendedActions(prompt),
+    };
+  }
+
   private modelFileToken(modelName: string): string {
     if (modelName.includes('z')) return 'zscore';
     if (modelName.includes('isolation')) return 'isolation_forest';
@@ -154,6 +239,75 @@ export class LmsAiOutputService {
       file: this.getFileInfo(file),
       missing: !readResult.exists,
     };
+  }
+
+  private withAssessmentFields(row: Record<string, string>, explanationRow: Record<string, string> | undefined, provider: string): Record<string, string> {
+    const explanation = explanationRow?.explanation || row.explanation || row.reviewReason || '';
+    return {
+      ...row,
+      provider: explanationRow?.provider || row.provider || row.genaiProvider || provider,
+      genAiExplanation: explanation,
+      explanation,
+      modelEvidence: row.agreeingModels || row.contributingModels || row.modelName || 'LMS Ensemble',
+      modelAgreement: row.modelAgreementCount || row.modelAgreementRatio || row.agreeingModels || '',
+      recommendedReviewerAction: row.recommendedReviewerAction || 'Review LMS source record and nearby daily sequence.',
+      reviewReason: row.reviewReason || this.buildReviewReason(row),
+    };
+  }
+
+  private getAssessmentJoinKey(row: Record<string, string>): string {
+    return [
+      row.stationId ?? '',
+      row.elementCode ?? '',
+      this.getComparableDate(row) ?? row.observationDatetime ?? '',
+      row.value ?? '',
+    ].join('|').toLowerCase();
+  }
+
+  private buildReviewReason(row: Record<string, string>): string {
+    const decision = row.finalDecision || row.outcome || 'NORMAL';
+    const score = row.anomalyScore || '0';
+    const agreement = row.modelAgreementCount || row.agreeingModels || '0';
+    return `LMS-trained AI ${decision} decision with anomaly score ${score} and model agreement ${agreement}.`;
+  }
+
+  private getRecommendedActions(prompt: string): string[] {
+    if (prompt.includes('supervisor')) {
+      return [
+        'Share current QC handoff volume and provider provenance with supervisors.',
+        'Assign review priority to FAILED and high-confidence SUSPECT rows.',
+        'Track confirmed corrections separately from AI anomaly counts.',
+      ];
+    }
+    if (prompt.includes('station')) {
+      return [
+        'Open the highest-risk station rows in QC Review Workspace.',
+        'Compare repeated station-element anomalies against neighboring dates.',
+        'Escalate repeated source-file patterns to data operations.',
+      ];
+    }
+    return [
+      'Review FAILED rows before SUSPECT rows.',
+      'Use LMS source records and nearby daily sequences as evidence.',
+      'Record whether the reviewer accepted, corrected, or escalated each row.',
+    ];
+  }
+
+  private normalizeProvider(provider?: string | null): string {
+    const value = `${provider ?? 'template'}`.trim().toLowerCase();
+    if (value.includes('gemini')) return 'Gemini';
+    if (value.includes('groq')) return 'Groq';
+    if (value.includes('template')) return 'Template fallback';
+    return provider?.toString() || 'Template fallback';
+  }
+
+  private formatNumber(value: any): string {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toLocaleString() : '0';
+  }
+
+  private formatPercent(value: any): string {
+    return `${((Number(value) || 0) * 100).toFixed(2)}%`;
   }
 
   private pageRows(rows: Record<string, string>[], query: LmsAiQuery) {

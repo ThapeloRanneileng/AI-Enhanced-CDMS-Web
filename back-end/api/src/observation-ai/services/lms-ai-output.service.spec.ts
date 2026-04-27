@@ -280,6 +280,76 @@ describe('LmsAiOutputService', () => {
     });
   });
 
+  it('returns LMS-trained QC assessments with merged provider and model evidence', () => {
+    fs.writeFileSync(
+      path.join(outputDir, 'lms_pipeline_run_manifest.json'),
+      JSON.stringify({ genaiProvider: 'template' }),
+      'utf8',
+    );
+    writeOutputCsv(
+      'lms_qc_review_handoff.csv',
+      [
+        'stationId,stationName,observationDatetime,elementCode,elementName,value,modelAgreementCount,agreeingModels,anomalyScore,confidence,severity,finalDecision,outcome,explanation,recommendedReviewerAction,reviewSource',
+        'LES001,Maseru,2011-01-01,rain,Rainfall,12.5,2,Z-score;Autoencoder,3.1,0.90,HIGH,FAILED,FAILED,handoff explanation,Review source,ai_ensemble',
+      ],
+    );
+    writeOutputCsv(
+      'lms_genai_reviewer_explanations.csv',
+      [
+        'provider,stationId,observationDatetime,elementCode,finalDecision,severity,confidence,explanation',
+        'template,LES001,2011-01-01,rain,FAILED,HIGH,0.90,GenAI reviewer explanation',
+      ],
+    );
+
+    const result = service.getQcAssessments({ stationId: 'LES001', elementCode: 'rain' });
+
+    expect(result).toMatchObject({
+      total: 1,
+      provider: 'Template fallback',
+      missing: false,
+    });
+    expect(result.rows[0]).toMatchObject({
+      stationId: 'LES001',
+      provider: 'Template fallback',
+      modelEvidence: 'Z-score;Autoencoder',
+      modelAgreement: '2',
+      recommendedReviewerAction: 'Review source',
+    });
+  });
+
+  it('returns deterministic agent insights from LMS output summaries', () => {
+    fs.writeFileSync(
+      path.join(outputDir, 'lms_pipeline_run_manifest.json'),
+      JSON.stringify({
+        runId: 'lms-run-1',
+        genaiProvider: 'template',
+        totalCleanRows: 100,
+        totalPredictionRows: 50,
+        qcReviewRows: 5,
+      }),
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(outputDir, 'lms_model_evaluation_summary.json'),
+      JSON.stringify({
+        modelMetrics: {
+          Ensemble: { anomalyCount: 5, anomalyRate: 0.1 },
+        },
+        stationAnomalyRates: [
+          { stationId: 'LES001', anomalyRate: 0.2 },
+        ],
+      }),
+      'utf8',
+    );
+
+    const result = service.getAgentInsights({ prompt: 'Summarize highest-risk stations' });
+
+    expect(result.provider).toBe('Template fallback');
+    expect(result.answer).toContain('LES001');
+    expect(result.evidence).toContain('Run ID: lms-run-1');
+    expect(result.recommendedActions.length).toBeGreaterThan(0);
+  });
+
   function writeOutputCsv(fileName: string, lines: string[]): void {
     fs.writeFileSync(path.join(outputDir, fileName), `${lines.join('\n')}\n`, 'utf8');
   }

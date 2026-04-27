@@ -16,6 +16,10 @@ Run `ng generate component component-name` to generate a new component. You can 
 
 Run `npm run build` from this directory, or `npm --prefix front-end/pwa run build` from the repository root. The build artifacts are written to the `dist/` directory.
 
+## LMS AI GenAI Provider
+
+Live Gemini/Groq GenAI requires `LMS_GENAI_PROVIDER` and the matching API key. The `template` provider is used for offline or local validation, and the provider used by a run is recorded in the LMS pipeline manifest.
+
 ## Running unit tests
 
 Run `ng test` to execute the unit tests via [Karma](https://karma-runner.github.io).

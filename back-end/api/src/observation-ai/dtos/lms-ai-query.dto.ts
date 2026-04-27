@@ -55,6 +55,10 @@ export class LmsAiQueryDto extends ViewObservationQueryDTO {
   modelName?: string;
 
   @IsOptional()
+  @IsString()
+  prompt?: string;
+
+  @IsOptional()
   @IsNumberString()
   limit?: string;
 

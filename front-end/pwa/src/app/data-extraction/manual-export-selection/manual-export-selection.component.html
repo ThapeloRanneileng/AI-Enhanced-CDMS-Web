@@ -29,7 +29,7 @@
       <div class="card-header d-flex justify-content-between align-items-center">
          <div>
             <div class="cdms-panel-title">LMS AI Reports</div>
-            <div class="cdms-panel-subtitle">Supervisor summary, model evaluation, manifest, anomaly summaries, and QC review counts from the LMS historical AI pipeline.</div>
+            <div class="cdms-panel-subtitle">AI Generated Reports: GenAI model summary, supervisor summary, reviewer explanations, model evaluation summary, pipeline manifest, provider provenance, and next recommended actions.</div>
          </div>
          <span class="cdms-header-chip">{{ lmsManifest.qcReviewRows || 0 }} QC review rows</span>
       </div>
@@ -47,6 +47,9 @@
                <div class="col-md-3"><strong>GenAI model summary</strong><div class="small text-muted">{{ lmsGenAiSummary?.exists ? 'Available' : 'Not generated' }}</div></div>
                <div class="col-md-3"><strong>Supervisor summary</strong><div class="small text-muted">{{ lmsSupervisorSummarySections.length ? 'Available' : 'Not generated' }}</div></div>
                <div class="col-md-3"><strong>Reviewer explanations</strong><div class="small text-muted">{{ lmsGenAiReviewerExplanationCount }}</div></div>
+               <div class="col-md-3"><strong>Model evaluation summary</strong><div class="small text-muted">{{ lmsAiStatus?.modelSummary ? 'Available' : 'Not generated' }}</div></div>
+               <div class="col-md-3"><strong>Pipeline manifest</strong><div class="small text-muted">{{ lmsManifest.runId || 'Not generated' }}</div></div>
+               <div class="col-md-6"><strong>GenAI setup note</strong><div class="small text-muted">Live Gemini/Groq GenAI requires LMS_GENAI_PROVIDER and API key. Template provider is used for offline/local validation. The provider is recorded in the manifest.</div></div>
             </div>
             <div class="row g-2 mt-2" *ngIf="lmsGenAiSummary?.sections?.length">
                <div class="col-md-4" *ngFor="let section of lmsGenAiSummary?.sections">

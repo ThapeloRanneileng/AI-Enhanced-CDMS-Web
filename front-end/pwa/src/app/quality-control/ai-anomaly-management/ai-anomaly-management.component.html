@@ -2,8 +2,8 @@
   <div class="hero-panel">
     <div>
       <span class="eyebrow">Observation AI</span>
-      <h2>AI Anomaly Management</h2>
-      <p>Prepare datasets, train baseline anomaly models, and inspect persisted model metadata for the shared observation pipeline.</p>
+      <h2>LMS AI Model & Agent Centre</h2>
+      <p>LMS historical data trains the anomaly models; QC Review Workspace uses this trained AI layer for anomaly evidence, explanations, recommendations, and reporting.</p>
     </div>
     <button type="button" class="btn btn-light btn-sm" (click)="refreshLists()" [disabled]="loading">
       <i class="bi bi-arrow-clockwise"></i> Refresh
@@ -46,43 +46,85 @@
   </div>
 
   <div class="panel" *ngIf="lmsAiStatus?.available">
-    <div class="panel-title">LMS Historical AI Pipeline Results</div>
+    <div class="panel-title">LMS Trained Model Status</div>
     <div class="detail-grid">
       <div class="source-card mini-card"><span class="field-label">Latest run ID</span><strong>{{ lmsManifest.runId }}</strong></div>
-      <div class="source-card mini-card"><span class="field-label">Input rows</span><strong>{{ formatCount(lmsManifest.totalInputRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Training data source</span><strong>{{ lmsTrainingSource }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Training period</span><strong>{{ lmsTrainingPeriod }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Trained stations</span><strong>{{ lmsTrainedStationsCount }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">LMS elements present</span><strong>{{ lmsTrainedElements }}</strong></div>
       <div class="source-card mini-card"><span class="field-label">Clean rows</span><strong>{{ formatCount(lmsManifest.totalCleanRows) }}</strong></div>
       <div class="source-card mini-card"><span class="field-label">Rejected rows</span><strong>{{ formatCount(lmsManifest.totalRejectedRows) }}</strong></div>
       <div class="source-card mini-card"><span class="field-label">Prediction rows</span><strong>{{ formatCount(lmsManifest.totalPredictionRows) }}</strong></div>
       <div class="source-card mini-card"><span class="field-label">QC review rows</span><strong>{{ formatCount(lmsManifest.qcReviewRows) }}</strong></div>
-      <div class="source-card mini-card"><span class="field-label">Warning rows</span><strong>{{ formatCount(lmsManifest.warningRows) }}</strong></div>
-      <div class="source-card mini-card"><span class="field-label">Autoencoder calibration</span><strong>{{ lmsManifest.autoencoderCalibrationMode || 'Not available' }}</strong></div>
-      <div class="source-card mini-card"><span class="field-label">Ensemble anomaly rate</span><strong>{{ formatRate(lmsModelSummary?.anomalyRatePerModel?.Ensemble) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Model/pipeline version</span><strong>{{ modelVersion }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">GenAI provider used</span><strong>{{ lmsGenAiProvider }}</strong></div>
     </div>
 
-    <div class="grid-two mt-3">
-      <div>
-        <div class="panel-title">Per-Model Metrics</div>
+    <div class="mt-3">
+        <div class="panel-title">LMS-trained models</div>
         <div class="table-wrap">
           <table class="table table-sm table-hover">
-            <thead><tr><th>Model</th><th>Total</th><th>Anomalies</th><th>Rate</th><th>Max score</th></tr></thead>
+            <thead><tr><th>Model</th><th>Total rows</th><th>Anomaly count</th><th>Anomaly rate</th><th>Max score</th><th>Status</th><th>Decision contribution</th></tr></thead>
             <tbody>
-              <tr *ngFor="let item of lmsModelMetricsEntries">
+              <tr *ngFor="let item of lmsModelCards">
                 <td>{{ item.name }}</td>
-                <td>{{ item.metrics.totalRows }}</td>
-                <td>{{ item.metrics.anomalyCount }}</td>
-                <td>{{ formatRate(item.metrics.anomalyRate) }}</td>
-                <td>{{ item.metrics.maxAnomalyScore }}</td>
+                <td>{{ formatCount(item.metrics?.totalRows) }}</td>
+                <td>{{ formatCount(item.metrics?.anomalyCount) }}</td>
+                <td>{{ formatRate(item.metrics?.anomalyRate) }}</td>
+                <td>{{ item.metrics?.maxAnomalyScore ?? 'Not available' }}</td>
+                <td>{{ item.status }}</td>
+                <td>{{ item.contribution }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-      </div>
+    </div>
+
+    <div class="grid-two mt-3">
       <div>
         <div class="panel-title">Generated Reports</div>
         <div class="source-card" *ngFor="let report of lmsReports">
           <strong>{{ report.fileName }}</strong>
           <span>{{ report.label }}</span>
         </div>
+      </div>
+    </div>
+
+    <div class="panel-subtitle mt-3">AI Climate QC Assistant</div>
+    <div class="agent-panel">
+      <div class="agent-prompts">
+        <button
+          type="button"
+          class="btn btn-sm"
+          [class.btn-primary]="prompt === lmsAgentPrompt"
+          [class.btn-outline-primary]="prompt !== lmsAgentPrompt"
+          *ngFor="let prompt of lmsAgentPrompts"
+          (click)="queryAgentInsights(prompt)"
+          [disabled]="lmsAgentLoading">
+          {{ prompt }}
+        </button>
+      </div>
+      <div class="source-card">
+        <div class="field-label">Provider</div>
+        <strong>{{ lmsAgentInsights?.provider || lmsGenAiProvider }}</strong>
+        <p class="agent-answer" *ngIf="!lmsAgentLoading">{{ lmsAgentInsights?.answer || 'Choose a quick prompt to load LMS AI agent insight.' }}</p>
+        <p class="agent-answer" *ngIf="lmsAgentLoading">Loading LMS AI agent insight...</p>
+        <div class="grid-two">
+          <div>
+            <strong>Evidence</strong>
+            <ul>
+              <li *ngFor="let item of lmsAgentInsights?.evidence">{{ item }}</li>
+            </ul>
+          </div>
+          <div>
+            <strong>Next recommended actions</strong>
+            <ul>
+              <li *ngFor="let item of lmsAgentInsights?.recommendedActions">{{ item }}</li>
+            </ul>
+          </div>
+        </div>
+        <small *ngIf="lmsAgentInsights?.errorMessage">{{ lmsAgentInsights?.errorMessage }}</small>
       </div>
     </div>
 
@@ -214,8 +256,8 @@
     </div>
   </div>
 
-  <div class="panel legacy-panel" [class.legacy-muted]="lmsHasOutputs">
-    <div class="panel-title">Legacy/proxy training controls</div>
+  <details class="panel legacy-panel" [class.legacy-muted]="lmsHasOutputs">
+    <summary class="panel-title">Legacy/proxy training controls</summary>
     <p class="legacy-note" *ngIf="lmsHasOutputs">
       LMS historical outputs are available above. These controls remain for the older proxy training workflow and are not the primary LMS demo evidence.
     </p>
@@ -263,9 +305,9 @@
       </button>
       <button type="button" class="btn btn-primary" (click)="runTraining()" [disabled]="loading">Run Training</button>
     </div>
-  </div>
+  </details>
 
-  <div class="grid-two">
+  <div class="grid-two" *ngIf="!lmsHasOutputs">
     <div class="panel">
       <div class="panel-title">Proxy Training Sources</div>
       <div class="source-card" *ngFor="let source of proxySources">

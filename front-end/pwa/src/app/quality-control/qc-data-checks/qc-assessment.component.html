@@ -60,7 +60,7 @@
                             <div>
                                 <div class="fw-bold">Unified QC Review Queue</div>
                                 <div class="small text-muted">
-                                    Rule-based QC, ML anomaly outputs, generative explanation, and reviewer decisions in one place.
+                                    Rule-based QC plus LMS-trained anomaly decisions, scores, confidence, model agreement, explanations, and reviewer recommendations in one place.
                                 </div>
                             </div>
                             <div *ngIf="pageInputDefinition.totalRowCount">
@@ -95,6 +95,7 @@
                         </div>
                         <div class="small text-muted mb-2">
                             {{ unifiedReviewCount }} review record{{ unifiedReviewCount === 1 ? '' : 's' }} loaded.
+                            {{ loadedLmsAssessmentCount }} LMS-trained AI assessment row{{ loadedLmsAssessmentCount === 1 ? '' : 's' }} matched the current filters.
                             <span *ngIf="loadedObservationCount > 0">
                                 {{ loadedObservationCount }} observation{{ loadedObservationCount === 1 ? '' : 's' }} matched;
                                 {{ loadedRuleFailedObservationCount }} failed rule-based QC.
@@ -107,9 +108,11 @@
                                         <th>#</th>
                                         <th>Observation</th>
                                         <th>Rule-Based QC</th>
+                                        <th>AI Decision</th>
                                         <th>Failed Checks</th>
                                         <th>AI Score</th>
                                         <th>AI Confidence</th>
+                                        <th>Model Agreement</th>
                                         <th>AI Explanation</th>
                                         <th>Review Source</th>
                                         <th>Final Decision</th>
@@ -136,6 +139,9 @@
                                             <span [class]="getRuleStatusClass(item)">{{ formatRuleStatus(item) }}</span>
                                         </td>
                                         <td>
+                                            <span [class]="getAIOutcomeClass(item)">{{ formatAIOutcome(item) }}</span>
+                                        </td>
+                                        <td>
                                             <div *ngIf="item.failedChecks.length === 0" class="text-muted small">None</div>
                                             <div *ngFor="let failedCheck of item.failedChecks" class="small">
                                                 {{ failedCheck }}
@@ -143,8 +149,11 @@
                                         </td>
                                         <td>{{ formatAIScore(item) }}</td>
                                         <td>{{ formatAIConfidence(item) }}</td>
+                                        <td>{{ getModelAgreement(item) }}</td>
                                         <td class="qc-explanation-cell">
                                             {{ item.aiExplanation }}
+                                            <div class="small text-muted mt-1">{{ item.recommendedReviewerAction }}</div>
+                                            <div class="small text-muted mt-1">Provider: {{ item.genAiProvider }}</div>
                                         </td>
                                         <td>
                                             <div class="small fw-semibold">{{ item.reviewSource }}</div>
@@ -157,7 +166,7 @@
                                         </td>
                                     </tr>
                                     <tr *ngIf="filteredReviewItems.length === 0">
-                                        <td colspan="9" class="py-4">
+                                        <td colspan="11" class="py-4">
                                             <div class="qc-empty-state">
                                                 <div class="qc-empty-icon">Q</div>
                                                 <div class="fw-semibold">No QC review records found for the selected filters.</div>
@@ -283,10 +292,14 @@
                                     <span class="detail-kv-label">Model</span>
                                     <span class="detail-kv-value">{{ getMlModelName(item) }}</span>
                                 </div>
-                                <div class="detail-status-item">
-                                    <span class="detail-kv-label">Version</span>
-                                    <span class="detail-kv-value">{{ getMlModelVersion(item) }}</span>
-                                </div>
+                                            <div class="detail-status-item">
+                                                <span class="detail-kv-label">Version</span>
+                                                <span class="detail-kv-value">{{ getMlModelVersion(item) }}</span>
+                                            </div>
+                                            <div class="detail-status-item">
+                                                <span class="detail-kv-label">Agreement</span>
+                                                <span class="detail-kv-value">{{ getModelAgreement(item) }}</span>
+                                            </div>
                             </div>
                             <div class="detail-chip-row mt-2" *ngIf="getTopMlSignals(item).length; else noSignals">
                                 <span class="detail-signal-chip" *ngFor="let signal of getTopMlSignals(item)">

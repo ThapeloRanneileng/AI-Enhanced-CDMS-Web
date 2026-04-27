@@ -19,6 +19,21 @@ export class LmsAiController {
     return this.lmsAiOutputService.getQcReview(query);
   }
 
+  @Get('qc-assessments')
+  public qcAssessments(@Query(AuthorisedStationsPipe) query: LmsAiQueryDto) {
+    return this.lmsAiOutputService.getQcAssessments(query);
+  }
+
+  @Get('assessments')
+  public assessments(@Query(AuthorisedStationsPipe) query: LmsAiQueryDto) {
+    return this.lmsAiOutputService.getQcAssessments(query);
+  }
+
+  @Get('agent-insights')
+  public agentInsights(@Query(AuthorisedStationsPipe) query: LmsAiQueryDto) {
+    return this.lmsAiOutputService.getAgentInsights(query);
+  }
+
   @Get('model-summary')
   public modelSummary(@Req() request: Request) {
     this.assertBroadLmsReportAccess(request);

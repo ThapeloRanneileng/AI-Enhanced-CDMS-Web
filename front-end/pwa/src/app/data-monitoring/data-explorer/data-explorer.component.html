@@ -151,7 +151,7 @@
         <div *ngIf="!lmsLoading && lmsRows.length" class="table-wrap">
             <table class="table table-hover align-middle observation-table">
                 <thead>
-                    <tr><th>Date</th><th>Station</th><th>Element</th><th class="text-end">Value</th><th>Decision</th><th>Severity</th><th>Score</th><th>Agreement</th><th>Explanation</th></tr>
+                    <tr><th>Date</th><th>Station</th><th>Element</th><th class="text-end">Value</th><th>Decision</th><th>Severity</th><th>Score</th><th>Agreement</th><th>Provider</th><th>Explanation and recommendation</th></tr>
                 </thead>
                 <tbody>
                     <tr *ngFor="let row of lmsRows">
@@ -162,8 +162,12 @@
                         <td>{{ getLmsDecision(row) }}</td>
                         <td>{{ row['severity'] }}</td>
                         <td>{{ row['anomalyScore'] }}</td>
-                        <td>{{ row['modelAgreementCount'] || row['agreeingModels'] }}</td>
-                        <td>{{ row['explanation'] }}</td>
+                        <td>{{ row['modelAgreement'] || row['modelAgreementCount'] || row['agreeingModels'] }}</td>
+                        <td>{{ row['provider'] }}</td>
+                        <td>
+                            <div>{{ row['genAiExplanation'] || row['explanation'] }}</div>
+                            <div class="secondary-cell">{{ row['recommendedReviewerAction'] }}</div>
+                        </td>
                     </tr>
                 </tbody>
             </table>

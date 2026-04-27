@@ -96,6 +96,7 @@ export class QCAssessmentComponent implements OnDestroy {
   protected loadedObservationCount: number = 0;
   protected loadedRuleFailedObservationCount: number = 0;
   protected loadedAnomalyAssessmentCount: number = 0;
+  protected loadedLmsAssessmentCount: number = 0;
   protected emptyWorkspaceMessage: string = 'Try widening the date range or removing some filters.';
   protected lmsReviewWarningMessage: string = '';
   private allReviewItems: QCReviewItem[] = [];
@@ -168,6 +169,7 @@ export class QCAssessmentComponent implements OnDestroy {
     this.loadedObservationCount = 0;
     this.loadedRuleFailedObservationCount = 0;
     this.loadedAnomalyAssessmentCount = 0;
+    this.loadedLmsAssessmentCount = 0;
     this.emptyWorkspaceMessage = 'Try widening the date range or removing some filters.';
     this.lmsReviewWarningMessage = '';
     this.selectedReviewKey = null;
@@ -421,6 +423,15 @@ export class QCAssessmentComponent implements OnDestroy {
     return item.aiAssessment.mlAnomalyOutputs?.modelVersion ?? item.aiAssessment.modelVersion;
   }
 
+  protected getModelAgreement(item: QCReviewItem): string {
+    const snapshot = (item.aiAssessment?.mlAnomalyOutputs?.featureSnapshot ?? item.aiAssessment?.featureSnapshot ?? {}) as Record<string, number | string | null>;
+    const agreement = snapshot['modelAgreement']
+      || snapshot['modelAgreementCount']
+      || item.aiAssessment?.externalReviewMetadata?.anomalyType
+      || 'Not available';
+    return `${agreement}`;
+  }
+
   protected getGenerativeSummary(item: QCReviewItem): string {
     return item.aiAssessment?.generativeExplanation?.summary ?? item.aiExplanation;
   }
@@ -547,6 +558,7 @@ export class QCAssessmentComponent implements OnDestroy {
 
       this.loadedObservationCount = allObservations.length;
       this.loadedAnomalyAssessmentCount = allAnomalyAssessments.length;
+      this.loadedLmsAssessmentCount = lmsReviewRows.length;
 
       const observationEntries = allObservations.map(observation => this.createObservationEntry(observation));
       const observationEntryMap = new Map<string, ObservationEntry>();
@@ -665,6 +677,10 @@ export class QCAssessmentComponent implements OnDestroy {
         const key = this.getLmsReviewKey(row);
         const persistedReview = reviewState.reviews[key];
         this.allReviewItems.push(this.buildLmsReviewItem(row, key, persistedReview));
+      }
+
+      if (allObservations.length > 0 && lmsReviewRows.length === 0 && !this.lmsReviewWarningMessage) {
+        this.lmsReviewWarningMessage = 'AI model is trained from LMS historical data. This observation can be assessed when it matches trained station/element/date support or after the scoring job is run.';
       }
 
       this.allReviewItems.sort((left, right) =>
@@ -1003,9 +1019,9 @@ export class QCAssessmentComponent implements OnDestroy {
     let offset = 0;
 
     for (let page = 0; page < maxPages; page++) {
-      const result = await firstValueFrom(this.lmsAiService.qcReview({ ...lmsQuery, limit: pageSize, offset }).pipe(take(1)));
+      const result = await firstValueFrom(this.lmsAiService.qcAssessments({ ...lmsQuery, limit: pageSize, offset }).pipe(take(1)));
       if (result.errorMessage) {
-        this.lmsReviewWarningMessage = 'LMS AI review rows could not be loaded. Existing QC records are still available.';
+        this.lmsReviewWarningMessage = 'LMS-trained AI assessment rows could not be loaded. Existing QC records are still available.';
         console.warn('[QC Review Workspace] LMS review rows unavailable', result.errorMessage);
         return rows;
       }
@@ -1117,7 +1133,7 @@ export class QCAssessmentComponent implements OnDestroy {
         confidenceScore: confidence,
         severity,
         contributingSignals: [],
-        featureSnapshot: { modelAgreementCount: row['modelAgreementCount'], reviewSource: row['reviewSource'] },
+        featureSnapshot: { modelAgreementCount: row['modelAgreementCount'], modelAgreement: row['modelAgreement'], reviewSource: row['reviewSource'] },
       },
       externalReviewMetadata: {
         recordId: key,
@@ -1165,7 +1181,7 @@ export class QCAssessmentComponent implements OnDestroy {
       reviewSource: row['reviewSource'] || 'lms_ai',
       reviewReason: row['reviewReason'] || row['explanation'],
       recommendedReviewerAction: row['recommendedReviewerAction'] || 'Review LMS source record and nearby daily sequence.',
-      genAiProvider: row['provider'] || row['genaiProvider'] || 'Template AI explanation',
+      genAiProvider: row['provider'] || row['genaiProvider'] || 'Template fallback',
       reviewerDecision: persistedReview?.decision ?? 'pending',
       reviewerNotes: persistedReview?.notes ?? '',
       correctedValue: persistedReview?.correctedValue ?? null,

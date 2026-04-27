@@ -11,11 +11,18 @@ import {
   AnomalyTrainingRun,
   ObservationAiTrainingService,
 } from '../services/observation-ai-training.service';
-import { LmsAiGenAiSummary, LmsAiService, LmsAiStatus } from '../services/lms-ai.service';
+import { LmsAiAgentInsights, LmsAiGenAiSummary, LmsAiService, LmsAiStatus } from '../services/lms-ai.service';
 
 interface SupervisorSummarySection {
   title: string;
   lines: string[];
+}
+
+interface LmsModelCard {
+  name: string;
+  contribution: string;
+  metrics: any;
+  status: string;
 }
 
 @Component({
@@ -61,6 +68,16 @@ export class AiAnomalyManagementComponent implements OnInit {
   protected lmsPreviewErrorMessage = '';
   protected lmsGenAiSummary: LmsAiGenAiSummary | null = null;
   protected lmsGenAiReviewerRows: Record<string, string>[] = [];
+  protected lmsAgentInsights: LmsAiAgentInsights | null = null;
+  protected lmsAgentLoading = false;
+  protected lmsAgentPrompt = 'Explain current model performance';
+  protected readonly lmsAgentPrompts = [
+    'Explain current model performance',
+    'Summarize highest-risk stations',
+    'Recommend reviewer actions',
+    'Generate supervisor update',
+    'Explain why anomalies are not automatically wrong values',
+  ];
   protected readonly supervisorSummarySectionTitles = [
     'Pipeline Run Overview',
     'Data Ingestion Summary',
@@ -79,7 +96,7 @@ export class AiAnomalyManagementComponent implements OnInit {
     private observationAnomalyAssessmentsService: ObservationAnomalyAssessmentsService,
     private lmsAiService: LmsAiService,
   ) {
-    this.pagesDataService.setPageHeader('AI Anomaly Management');
+    this.pagesDataService.setPageHeader('LMS AI Model & Agent Centre');
   }
 
   ngOnInit(): void {
@@ -146,6 +163,7 @@ export class AiAnomalyManagementComponent implements OnInit {
           .filter(file => file.exists && ['modelSummary', 'modelSummaryMarkdown', 'supervisorSummary', 'manifest', 'qcReview', 'ensemble', 'genaiModelSummary', 'genaiReviewerExplanations'].includes(file.key))
           .map(file => ({ label: file.key, fileName: file.fileName, exists: file.exists }));
         this.syncSelectedModel();
+        this.queryAgentInsights(this.lmsAgentPrompt);
       },
       error: err => this.handleError(err),
     });
@@ -199,6 +217,45 @@ export class AiAnomalyManagementComponent implements OnInit {
     return Object.keys(metrics).map(name => ({ name, metrics: metrics[name] }));
   }
 
+  protected get lmsModelCards(): LmsModelCard[] {
+    const metrics = this.lmsModelSummary?.modelMetrics ?? {};
+    const statusRows = this.lmsModelSummary?.modelStatus ?? [];
+    const statusFor = (name: string) => statusRows.find((row: any) => `${row.modelName}`.toLowerCase() === name.toLowerCase())?.status
+      || (metrics[name] ? 'trained/available' : 'not available');
+    return [
+      {
+        name: 'Z-score baseline',
+        metrics: metrics['Z-score'],
+        status: metrics['Z-score'] ? 'trained/available' : 'not available',
+        contribution: 'Seasonal statistical baseline that flags values far from learned LMS station-element distributions.',
+      },
+      {
+        name: 'Isolation Forest',
+        metrics: metrics['Isolation Forest'],
+        status: statusFor('Isolation Forest'),
+        contribution: 'Learns feature-space isolation patterns and contributes model-agreement evidence for unusual LMS observations.',
+      },
+      {
+        name: 'One-Class SVM',
+        metrics: metrics['One-Class SVM'],
+        status: statusFor('One-Class SVM'),
+        contribution: 'Learns a normal historical boundary and flags LMS observations outside that support.',
+      },
+      {
+        name: 'Autoencoder',
+        metrics: metrics['Autoencoder'],
+        status: statusFor('Autoencoder'),
+        contribution: 'Uses reconstruction error to highlight station-element patterns that do not match learned historical structure.',
+      },
+      {
+        name: 'Ensemble decision layer',
+        metrics: metrics['Ensemble'],
+        status: metrics['Ensemble'] ? 'trained/available' : 'not available',
+        contribution: 'Combines model outcomes into the final NORMAL, SUSPECT, or FAILED QC review handoff decision.',
+      },
+    ];
+  }
+
   protected get lmsTopStations(): any[] {
     return [...(this.lmsModelSummary?.stationAnomalyRates ?? [])]
       .sort((left, right) => Number(right.anomalyRate) - Number(left.anomalyRate))
@@ -224,10 +281,11 @@ export class AiAnomalyManagementComponent implements OnInit {
   }
 
   protected get lmsGenAiProvider(): string {
-    return this.lmsGenAiSummary?.provider
+    const provider = this.lmsGenAiSummary?.provider
       || this.lmsAiStatus?.genaiProvider
       || this.lmsManifest.genaiProvider
       || 'Not available';
+    return this.formatProvider(provider);
   }
 
   protected get isTemplateGenAiProvider(): boolean {
@@ -241,6 +299,51 @@ export class AiAnomalyManagementComponent implements OnInit {
   protected formatCount(value: any): string {
     const numericValue = Number(value);
     return Number.isFinite(numericValue) ? numericValue.toLocaleString() : '0';
+  }
+
+  protected get lmsTrainingSource(): string {
+    return 'LMS historical climate data';
+  }
+
+  protected get lmsTrainingPeriod(): string {
+    const summaryRows = this.lmsModelSummary?.trainTestSummary ?? this.lmsModelSummary?.trainingPeriod;
+    if (typeof summaryRows === 'string') return summaryRows;
+    const from = this.lmsManifest.trainingRangeFrom || this.lmsModelSummary?.trainingRangeFrom || this.lmsModelSummary?.minObservationDate;
+    const to = this.lmsManifest.trainingRangeTo || this.lmsModelSummary?.trainingRangeTo || this.lmsModelSummary?.maxObservationDate;
+    if (from || to) return `${from || 'start'} to ${to || 'end'}`;
+    return 'Historical LMS range from pipeline manifest/model summary';
+  }
+
+  protected get lmsTrainedStationsCount(): string {
+    const count = this.lmsManifest.trainedStationsCount
+      || this.lmsModelSummary?.trainedStationsCount
+      || this.lmsModelSummary?.stationAnomalyRates?.length;
+    return count ? this.formatCount(count) : 'Not available';
+  }
+
+  protected get lmsTrainedElements(): string {
+    const elements = this.lmsManifest.trainedElements
+      || this.lmsModelSummary?.trainedElements
+      || this.lmsModelSummary?.elementAnomalyRates?.map((row: any) => row.elementCode);
+    return Array.isArray(elements) && elements.length ? elements.join(', ') : 'Present in LMS historical data';
+  }
+
+  protected get lmsPipelineVersion(): string {
+    return this.lmsManifest.pipelineVersion || this.lmsManifest.pipelineName || 'Not available';
+  }
+
+  protected get modelVersion(): string {
+    return this.lmsManifest.runId || this.lmsPipelineVersion;
+  }
+
+  protected queryAgentInsights(prompt: string): void {
+    if (!this.lmsAiStatus?.available) return;
+    this.lmsAgentPrompt = prompt;
+    this.lmsAgentLoading = true;
+    this.lmsAiService.agentInsights({ prompt, limit: 5 }).pipe(take(1)).subscribe({
+      next: result => this.lmsAgentInsights = result,
+      complete: () => this.lmsAgentLoading = false,
+    });
   }
 
   protected isElementSelected(code: string): boolean {
@@ -311,6 +414,14 @@ export class AiAnomalyManagementComponent implements OnInit {
       fromDate: this.fromDate ? `${this.fromDate}T00:00:00.000Z` : undefined,
       toDate: this.toDate ? `${this.toDate}T23:59:59.000Z` : undefined,
     };
+  }
+
+  private formatProvider(provider: string): string {
+    const value = `${provider}`.toLowerCase();
+    if (value.includes('gemini')) return 'Gemini';
+    if (value.includes('groq')) return 'Groq';
+    if (value.includes('template')) return 'Template fallback';
+    return provider;
   }
 
   private handleError(err: any): void {

@@ -19,6 +19,7 @@ export interface LmsAiQuery {
   severity?: string;
   reviewSource?: string;
   modelName?: string;
+  prompt?: string;
   limit?: number;
   offset?: number;
 }
@@ -58,6 +59,14 @@ export interface LmsAiGenAiSummary extends LmsAiMarkdownReport {
   sections: { title: string; lines: string[] }[];
 }
 
+export interface LmsAiAgentInsights {
+  provider: string;
+  answer: string;
+  evidence: string[];
+  recommendedActions: string[];
+  errorMessage?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class LmsAiService {
   private readonly endPointUrl: string;
@@ -77,6 +86,10 @@ export class LmsAiService {
 
   public qcReview(query: LmsAiQuery = {}): Observable<LmsAiPagedRows> {
     return this.getPaged('qc-review', query);
+  }
+
+  public qcAssessments(query: LmsAiQuery = {}): Observable<LmsAiPagedRows> {
+    return this.getPaged('qc-assessments', query);
   }
 
   public ensemble(query: LmsAiQuery = {}): Observable<LmsAiPagedRows> {
@@ -121,6 +134,19 @@ export class LmsAiService {
 
   public genAiReviewerExplanations(query: LmsAiQuery = {}): Observable<LmsAiPagedRows> {
     return this.getPaged('genai-reviewer-explanations', query);
+  }
+
+  public agentInsights(query: LmsAiQuery = {}): Observable<LmsAiAgentInsights> {
+    return this.http.get<LmsAiAgentInsights>(
+      `${this.endPointUrl}/agent-insights`,
+      { params: StringUtils.getQueryParams<LmsAiQuery>(query) },
+    ).pipe(catchError(err => of({
+      provider: 'Template fallback',
+      answer: '',
+      evidence: [],
+      recommendedActions: [],
+      errorMessage: this.getFriendlyError(err),
+    })));
   }
 
   private getPaged(path: string, query: LmsAiQuery): Observable<LmsAiPagedRows> {
