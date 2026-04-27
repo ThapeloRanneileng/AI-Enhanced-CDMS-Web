@@ -187,6 +187,79 @@ describe('LmsAiOutputService', () => {
     expect(result.rows[0].value).toBe('2');
   });
 
+  it('returns GenAI summary provider and parsed markdown sections', () => {
+    fs.writeFileSync(
+      path.join(outputDir, 'lms_pipeline_run_manifest.json'),
+      JSON.stringify({ genaiProvider: 'gemini' }),
+      'utf8',
+    );
+    writeOutputCsv(
+      'lms_genai_model_summary.md',
+      [
+        '# LMS GenAI Model Summary',
+        '',
+        'provider=template',
+        '',
+        'Model-level insight text.',
+        '',
+        '## Reviewer Next Steps',
+        '- Review failed rows first.',
+      ],
+    );
+
+    const result = service.getGenAiSummary();
+    const status = service.getStatus();
+
+    expect(result).toMatchObject({
+      exists: true,
+      provider: 'template',
+    });
+    expect(result.sections).toEqual([
+      { title: 'LMS GenAI Model Summary', lines: ['provider=template', 'Model-level insight text.'] },
+      { title: 'Reviewer Next Steps', lines: ['Review failed rows first.'] },
+    ]);
+    expect(status).toMatchObject({
+      available: true,
+      genaiProvider: 'gemini',
+      genaiModelSummaryExists: true,
+    });
+  });
+
+  it('filters GenAI reviewer explanations by authorised station, date, outcome, severity, and paginates', () => {
+    writeOutputCsv(
+      'lms_genai_reviewer_explanations.csv',
+      [
+        'provider,stationId,observationDatetime,elementCode,finalDecision,severity,confidence,explanation',
+        'template,LES001,2011-01-01,rain,NORMAL,LOW,0.50,normal',
+        'template,LES002,2011-01-02,rain,SUSPECT,MEDIUM,0.70,suspect one',
+        'template,LES002,2011-01-03,tmin,SUSPECT,HIGH,0.80,suspect two',
+      ],
+    );
+
+    const result = service.getGenAiReviewerExplanations({
+      stationIds: ['LES002'],
+      elementCode: 'rain',
+      dateFrom: '2011-01-01',
+      dateTo: '2011-12-31',
+      finalDecision: 'SUSPECT',
+      severity: 'MEDIUM',
+      limit: 1,
+      offset: 0,
+    });
+
+    expect(result).toMatchObject({
+      total: 1,
+      limit: 1,
+      offset: 0,
+      missing: false,
+    });
+    expect(result.rows[0]).toMatchObject({
+      provider: 'template',
+      stationId: 'LES002',
+      explanation: 'suspect one',
+    });
+  });
+
   it.each([
     ['zscore', 'lms_zscore_predictions.csv', 'Z-score'],
     ['isolation forest', 'lms_isolation_forest_predictions.csv', 'Isolation Forest'],

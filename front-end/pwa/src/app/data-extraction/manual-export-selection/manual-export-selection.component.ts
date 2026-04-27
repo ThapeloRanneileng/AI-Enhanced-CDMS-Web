@@ -6,7 +6,7 @@ import { AppAuthService } from 'src/app/app-auth.service';
 import { PagesDataService } from 'src/app/core/services/pages-data.service';
 import { ViewExportSpecificationModel } from 'src/app/metadata/export-specifications/models/view-export-specification.model';
 import { ExportSpecificationsService } from 'src/app/metadata/export-specifications/services/export-specifications.service';
-import { LmsAiService, LmsAiStatus } from 'src/app/quality-control/services/lms-ai.service';
+import { LmsAiGenAiSummary, LmsAiService, LmsAiStatus } from 'src/app/quality-control/services/lms-ai.service';
 
 interface SupervisorSummarySection {
   title: string;
@@ -23,6 +23,8 @@ export class ManualExportSelectionComponent implements OnDestroy {
   protected lmsAiStatus: LmsAiStatus | null = null;
   protected lmsSupervisorSummary = '';
   protected lmsSupervisorSummarySections: SupervisorSummarySection[] = [];
+  protected lmsGenAiSummary: LmsAiGenAiSummary | null = null;
+  protected lmsGenAiReviewerExplanationCount = 0;
   protected readonly supervisorSummarySectionTitles = [
     'Pipeline Run Overview',
     'Data Ingestion Summary',
@@ -97,6 +99,10 @@ export class ManualExportSelectionComponent implements OnDestroy {
     return this.lmsAiStatus?.manifest ?? {};
   }
 
+  protected get lmsGenAiProvider(): string {
+    return this.lmsGenAiSummary?.provider || this.lmsAiStatus?.genaiProvider || this.lmsManifest.genaiProvider || 'Not available';
+  }
+
   private loadLmsReports(): void {
     this.lmsAiService.status().pipe(take(1)).subscribe({
       next: status => this.lmsAiStatus = status,
@@ -108,6 +114,14 @@ export class ManualExportSelectionComponent implements OnDestroy {
         this.lmsSupervisorSummarySections = this.parseSupervisorSummary(report.content);
       },
       error: () => this.lmsSupervisorSummary = '',
+    });
+    this.lmsAiService.genAiSummary().pipe(take(1)).subscribe({
+      next: report => this.lmsGenAiSummary = report,
+      error: () => this.lmsGenAiSummary = null,
+    });
+    this.lmsAiService.genAiReviewerExplanations({ limit: 1 }).pipe(take(1)).subscribe({
+      next: result => this.lmsGenAiReviewerExplanationCount = result.total,
+      error: () => this.lmsGenAiReviewerExplanationCount = 0,
     });
   }
 

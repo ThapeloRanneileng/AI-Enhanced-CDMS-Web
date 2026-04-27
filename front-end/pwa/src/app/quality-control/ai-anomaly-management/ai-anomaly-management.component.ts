@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { catchError, forkJoin, of, take } from 'rxjs';
+import { forkJoin, take } from 'rxjs';
 import { PagesDataService, ToastEventTypeEnum } from 'src/app/core/services/pages-data.service';
 import { ViewObservationAnomalyAssessmentModel } from '../models/view-observation-anomaly-assessment.model';
 import { ObservationAnomalyAssessmentsService } from '../services/observation-anomaly-assessments.service';
@@ -11,7 +11,7 @@ import {
   AnomalyTrainingRun,
   ObservationAiTrainingService,
 } from '../services/observation-ai-training.service';
-import { LmsAiService, LmsAiStatus } from '../services/lms-ai.service';
+import { LmsAiGenAiSummary, LmsAiService, LmsAiStatus } from '../services/lms-ai.service';
 
 interface SupervisorSummarySection {
   title: string;
@@ -57,6 +57,10 @@ export class AiAnomalyManagementComponent implements OnInit {
   protected lmsPreviewElementCode = '';
   protected lmsPreviewFromDate = '';
   protected lmsPreviewToDate = '';
+  protected lmsWarningMessage = '';
+  protected lmsPreviewErrorMessage = '';
+  protected lmsGenAiSummary: LmsAiGenAiSummary | null = null;
+  protected lmsGenAiReviewerRows: Record<string, string>[] = [];
   protected readonly supervisorSummarySectionTitles = [
     'Pipeline Run Overview',
     'Data Ingestion Summary',
@@ -117,18 +121,29 @@ export class AiAnomalyManagementComponent implements OnInit {
       proxySources: this.observationAiTrainingService.listProxySources(),
       trainingRuns: this.observationAiTrainingService.listTrainingRuns(),
       models: this.observationAiTrainingService.listModels(),
-      lmsStatus: this.lmsAiService.status().pipe(catchError(() => of(null))),
-      lmsSupervisorSummary: this.lmsAiService.supervisorSummary().pipe(catchError(() => of({ exists: false, content: '', file: null }))),
+      lmsStatus: this.lmsAiService.status(),
+      lmsSupervisorSummary: this.lmsAiService.supervisorSummary(),
+      lmsGenAiSummary: this.lmsAiService.genAiSummary(),
+      lmsGenAiReviewerRows: this.lmsAiService.genAiReviewerExplanations({ limit: 5 }),
     }).pipe(take(1)).subscribe({
       next: data => {
         this.proxySources = data.proxySources;
         this.trainingRuns = data.trainingRuns;
         this.models = data.models;
         this.lmsAiStatus = data.lmsStatus;
+        this.lmsWarningMessage = data.lmsStatus?.errorMessage || '';
         this.lmsSupervisorSummary = data.lmsSupervisorSummary.content;
         this.lmsSupervisorSummarySections = this.parseSupervisorSummary(data.lmsSupervisorSummary.content);
+        this.lmsGenAiSummary = data.lmsGenAiSummary;
+        this.lmsGenAiReviewerRows = data.lmsGenAiReviewerRows.rows;
+        if (!this.lmsWarningMessage) {
+          this.lmsWarningMessage = data.lmsSupervisorSummary.errorMessage
+            || data.lmsGenAiSummary.errorMessage
+            || data.lmsGenAiReviewerRows.errorMessage
+            || '';
+        }
         this.lmsReports = (data.lmsStatus?.files ?? [])
-          .filter(file => file.exists && ['modelSummary', 'modelSummaryMarkdown', 'supervisorSummary', 'manifest', 'qcReview', 'ensemble'].includes(file.key))
+          .filter(file => file.exists && ['modelSummary', 'modelSummaryMarkdown', 'supervisorSummary', 'manifest', 'qcReview', 'ensemble', 'genaiModelSummary', 'genaiReviewerExplanations'].includes(file.key))
           .map(file => ({ label: file.key, fileName: file.fileName, exists: file.exists }));
         this.syncSelectedModel();
       },
@@ -138,6 +153,7 @@ export class AiAnomalyManagementComponent implements OnInit {
 
   protected previewLmsDataset(): void {
     this.lmsPreviewLoading = true;
+    this.lmsPreviewErrorMessage = '';
     this.lmsAiService.normalizedObservations({
       stationId: this.lmsPreviewStationId || undefined,
       elementCode: this.lmsPreviewElementCode || undefined,
@@ -145,10 +161,9 @@ export class AiAnomalyManagementComponent implements OnInit {
       dateTo: this.lmsPreviewToDate || undefined,
       limit: 50,
     }).pipe(take(1)).subscribe({
-      next: result => this.lmsPreviewRows = result.rows,
-      error: err => {
-        this.lmsPreviewLoading = false;
-        this.handleError(err);
+      next: result => {
+        this.lmsPreviewRows = result.rows;
+        this.lmsPreviewErrorMessage = result.errorMessage || '';
       },
       complete: () => this.lmsPreviewLoading = false,
     });
@@ -202,6 +217,21 @@ export class AiAnomalyManagementComponent implements OnInit {
 
   protected get lmsHasOutputs(): boolean {
     return !!this.lmsAiStatus?.available;
+  }
+
+  protected get lmsStatusLoaded(): boolean {
+    return !!this.lmsAiStatus;
+  }
+
+  protected get lmsGenAiProvider(): string {
+    return this.lmsGenAiSummary?.provider
+      || this.lmsAiStatus?.genaiProvider
+      || this.lmsManifest.genaiProvider
+      || 'Not available';
+  }
+
+  protected get isTemplateGenAiProvider(): boolean {
+    return `${this.lmsGenAiProvider}`.toLowerCase().includes('template');
   }
 
   protected formatRate(value: any): string {

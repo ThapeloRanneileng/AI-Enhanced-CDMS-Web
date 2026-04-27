@@ -158,6 +158,16 @@ Autoencoder options:
 PYTHONPATH=src ./.venv/bin/python -m src.lms_ai_pipeline.run_all --epochs 10 --batch-size 128
 ```
 
+GenAI provider examples:
+
+```bash
+LMS_GENAI_PROVIDER=template PYTHONPATH=src ./.venv/bin/python -m src.lms_ai_pipeline.run_all
+LMS_GENAI_PROVIDER=gemini GEMINI_API_KEY=<redacted> PYTHONPATH=src ./.venv/bin/python -m src.lms_ai_pipeline.run_all
+LMS_GENAI_PROVIDER=groq GROQ_API_KEY=<redacted> PYTHONPATH=src ./.venv/bin/python -m src.lms_ai_pipeline.run_all
+```
+
+Do not print or commit API keys. The selected provider is recorded in `lms_pipeline_run_manifest.json` as `genaiProvider`.
+
 Supported options are:
 
 - `--epochs`

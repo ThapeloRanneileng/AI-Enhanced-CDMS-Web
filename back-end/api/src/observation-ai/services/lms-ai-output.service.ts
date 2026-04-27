@@ -43,6 +43,8 @@ export class LmsAiOutputService {
     modelSummary: { key: 'modelSummary', fileName: 'lms_model_evaluation_summary.json', type: 'json' },
     modelSummaryMarkdown: { key: 'modelSummaryMarkdown', fileName: 'lms_model_evaluation_summary.md', type: 'markdown' },
     supervisorSummary: { key: 'supervisorSummary', fileName: 'lms_supervisor_summary.md', type: 'markdown' },
+    genaiModelSummary: { key: 'genaiModelSummary', fileName: 'lms_genai_model_summary.md', type: 'markdown' },
+    genaiReviewerExplanations: { key: 'genaiReviewerExplanations', fileName: 'lms_genai_reviewer_explanations.csv', type: 'csv' },
     autoencoderStatus: { key: 'autoencoderStatus', fileName: 'lms_autoencoder_status.csv', type: 'csv' },
   };
 
@@ -65,6 +67,13 @@ export class LmsAiOutputService {
       manifest: manifest.data ?? null,
       modelSummary: modelSummary.data ?? null,
       autoencoderStatus: autoencoderStatus.rows[0] ?? null,
+      genaiProvider: manifest.data?.genaiProvider ?? null,
+      genaiModelSummaryExists: this.getFileInfo(this.knownFiles.genaiModelSummary).exists,
+      genaiReviewerExplanationsExists: this.getFileInfo(this.knownFiles.genaiReviewerExplanations).exists,
+      genaiReportFiles: [
+        this.getFileInfo(this.knownFiles.genaiModelSummary),
+        this.getFileInfo(this.knownFiles.genaiReviewerExplanations),
+      ],
       files: Object.values(this.knownFiles).map(file => this.getFileInfo(file)),
     };
   }
@@ -83,6 +92,16 @@ export class LmsAiOutputService {
 
   public getModelSummaryMarkdown() {
     return this.readMarkdown(this.knownFiles.modelSummaryMarkdown);
+  }
+
+  public getGenAiSummary() {
+    const report = this.readMarkdown(this.knownFiles.genaiModelSummary);
+    const manifest = this.readJson(this.knownFiles.manifest);
+    return {
+      ...report,
+      provider: this.getGenAiProvider(report.content, manifest.data?.genaiProvider),
+      sections: this.parseMarkdownSections(report.content),
+    };
   }
 
   public getQcReview(query: LmsAiQuery) {
@@ -113,6 +132,10 @@ export class LmsAiOutputService {
     const rows = files.flatMap(file => this.readCsv(file).rows);
     const { modelName: _modelName, ...rowQuery } = query;
     return this.pageRows(this.filterRows(rows, rowQuery), query);
+  }
+
+  public getGenAiReviewerExplanations(query: LmsAiQuery) {
+    return this.queryCsv(this.knownFiles.genaiReviewerExplanations, query);
   }
 
   private modelFileToken(modelName: string): string {
@@ -215,6 +238,34 @@ export class LmsAiOutputService {
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return dateOnly;
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().slice(0, 10);
+  }
+
+  private getGenAiProvider(content: string, manifestProvider?: string): string | null {
+    const match = content.match(/^provider=(.+)$/m);
+    return (match?.[1] ?? manifestProvider ?? null)?.toString().trim() || null;
+  }
+
+  private parseMarkdownSections(content: string): { title: string; lines: string[] }[] {
+    const sections: { title: string; lines: string[] }[] = [];
+    let current: { title: string; lines: string[] } | null = null;
+
+    (content || '').replace(/\\n/g, '\n').split(/\r?\n/).forEach(rawLine => {
+      const line = rawLine.trim();
+      if (!line) return;
+      const heading = line.match(/^(#{1,3})\s+(.+)$/);
+      if (heading) {
+        current = { title: heading[2].trim(), lines: [] };
+        sections.push(current);
+        return;
+      }
+      if (!current) {
+        current = { title: 'Overview', lines: [] };
+        sections.push(current);
+      }
+      current.lines.push(line.replace(/^-\s*/, ''));
+    });
+
+    return sections;
   }
 
   private readJson(file: KnownFile) {

@@ -143,6 +143,9 @@
         <div class="results-subtitle" *ngIf="lmsTotal">
             Showing {{ lmsPageStart }}-{{ lmsPageEnd }} of {{ lmsTotal }} LMS AI rows.
         </div>
+        <div class="alert alert-warning py-2 mt-2 mb-0" *ngIf="lmsErrorMessage">
+            {{ lmsErrorMessage }}
+        </div>
         <div *ngIf="lmsLoading" class="state-panel">Loading LMS AI outputs...</div>
         <div *ngIf="!lmsLoading && !lmsRows.length" class="state-panel">No LMS AI outputs loaded for the selected filters.</div>
         <div *ngIf="!lmsLoading && lmsRows.length" class="table-wrap">

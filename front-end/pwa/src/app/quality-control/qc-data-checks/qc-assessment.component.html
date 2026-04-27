@@ -90,6 +90,9 @@
                         <div *ngIf="loadingAiContext" class="small text-muted mb-2">
                             Loading ML anomaly results and generative review assistance for the current review page...
                         </div>
+                        <div class="alert alert-warning py-2 mb-2" *ngIf="lmsReviewWarningMessage">
+                            {{ lmsReviewWarningMessage }}
+                        </div>
                         <div class="small text-muted mb-2">
                             {{ unifiedReviewCount }} review record{{ unifiedReviewCount === 1 ? '' : 's' }} loaded.
                             <span *ngIf="loadedObservationCount > 0">
@@ -296,9 +299,22 @@
                         </div>
 
                         <div class="mb-3">
+                            <div class="small text-muted text-uppercase fw-semibold">AI Explanation</div>
+                            <div class="border rounded p-2 mt-2">
+                                <div class="small">{{ item.aiExplanation }}</div>
+                                <div class="small text-muted mt-2" *ngIf="item.genAiProvider">
+                                    GenAI Provider: {{ item.genAiProvider }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
                             <div class="small text-muted text-uppercase fw-semibold">Suggested Reviewer Action</div>
                             <div class="small mt-2">
                                 {{ item.recommendedReviewerAction || getCompactReviewerAction(item) }}
+                            </div>
+                            <div class="small text-muted mt-2" *ngIf="item.reviewReason">
+                                Review Reason: {{ item.reviewReason }}
                             </div>
                         </div>
 

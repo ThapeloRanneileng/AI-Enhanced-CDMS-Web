@@ -40,6 +40,25 @@
             <div class="col-md-3"><strong>Rejected</strong><div class="small text-muted">{{ lmsManifest.totalRejectedRows }}</div></div>
             <div class="col-md-3"><strong>Warnings</strong><div class="small text-muted">{{ lmsManifest.warningRows }}</div></div>
          </div>
+         <div class="border rounded p-3 mb-3">
+            <div class="cdms-panel-title">AI Generated Reports</div>
+            <div class="row g-2 mt-1">
+               <div class="col-md-3"><strong>GenAI provider</strong><div class="small text-muted">{{ lmsGenAiProvider }}</div></div>
+               <div class="col-md-3"><strong>GenAI model summary</strong><div class="small text-muted">{{ lmsGenAiSummary?.exists ? 'Available' : 'Not generated' }}</div></div>
+               <div class="col-md-3"><strong>Supervisor summary</strong><div class="small text-muted">{{ lmsSupervisorSummarySections.length ? 'Available' : 'Not generated' }}</div></div>
+               <div class="col-md-3"><strong>Reviewer explanations</strong><div class="small text-muted">{{ lmsGenAiReviewerExplanationCount }}</div></div>
+            </div>
+            <div class="row g-2 mt-2" *ngIf="lmsGenAiSummary?.sections?.length">
+               <div class="col-md-4" *ngFor="let section of lmsGenAiSummary?.sections">
+                  <div class="bg-light border rounded p-2 h-100">
+                     <strong class="small d-block mb-1">{{ section.title }}</strong>
+                     <ul class="small text-muted ps-3 mb-0">
+                        <li *ngFor="let line of section.lines">{{ line }}</li>
+                     </ul>
+                  </div>
+               </div>
+            </div>
+         </div>
          <div class="row g-2">
             <div class="col-md-4" *ngFor="let section of lmsSupervisorSummarySections">
                <div class="border rounded p-2 h-100 bg-light">

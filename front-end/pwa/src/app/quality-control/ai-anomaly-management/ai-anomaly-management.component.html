@@ -33,6 +33,18 @@
     </div>
   </div>
 
+  <div class="panel warning-panel" *ngIf="lmsWarningMessage">
+    <div class="panel-title">LMS AI outputs could not be loaded</div>
+    <p>{{ lmsWarningMessage }}</p>
+    <small>Check that the backend API is running and LMS output files exist. Existing Climsoft anomaly training controls remain available below.</small>
+    <div class="actions">
+      <button type="button" class="btn btn-outline-primary btn-sm" (click)="previewLmsDataset()" [disabled]="lmsPreviewLoading">
+        Retry LMS Dataset Preview
+      </button>
+    </div>
+    <div class="small text-muted mt-2" *ngIf="lmsPreviewErrorMessage">{{ lmsPreviewErrorMessage }}</div>
+  </div>
+
   <div class="panel" *ngIf="lmsAiStatus?.available">
     <div class="panel-title">LMS Historical AI Pipeline Results</div>
     <div class="detail-grid">
@@ -89,6 +101,60 @@
       </div>
     </div>
 
+    <div class="panel-subtitle mt-3">Generative AI Insights</div>
+    <div class="detail-grid">
+      <div class="source-card mini-card">
+        <span class="field-label">Provider used</span>
+        <strong>{{ lmsGenAiProvider }}</strong>
+      </div>
+      <div class="source-card mini-card">
+        <span class="field-label">Model insight report</span>
+        <strong>{{ lmsAiStatus?.genaiModelSummaryExists ? 'Available' : 'Not generated' }}</strong>
+      </div>
+      <div class="source-card mini-card">
+        <span class="field-label">Reviewer explanations</span>
+        <strong>{{ lmsAiStatus?.genaiReviewerExplanationsExists ? 'Available' : 'Not generated' }}</strong>
+      </div>
+    </div>
+    <div class="source-card" *ngIf="isTemplateGenAiProvider">
+      <strong>Template AI provider</strong>
+      <small>Template provider was used for local/offline validation. Gemini/Groq can be enabled by setting the provider and API key environment variables.</small>
+    </div>
+    <div class="source-card" *ngIf="!lmsGenAiSummary?.exists">
+      <strong>No GenAI report generated</strong>
+      <small>Run the pipeline with LMS_GENAI_PROVIDER=gemini or groq and the required API key, or use LMS_GENAI_PROVIDER=template for offline validation.</small>
+    </div>
+    <div class="summary-section-grid" *ngIf="lmsGenAiSummary?.sections?.length">
+      <div class="summary-section-card" *ngFor="let section of lmsGenAiSummary?.sections">
+        <strong>{{ section.title }}</strong>
+        <ul>
+          <li *ngFor="let line of section.lines">{{ line }}</li>
+        </ul>
+      </div>
+    </div>
+    <div class="table-wrap mt-2">
+      <table class="table table-sm table-hover lms-preview-table">
+        <thead>
+          <tr><th>station</th><th>element</th><th>datetime</th><th>decision</th><th>severity</th><th>provider</th><th>explanation</th><th>recommended action</th></tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of lmsGenAiReviewerRows">
+            <td>{{ row['stationName'] || row['stationId'] }}</td>
+            <td>{{ row['elementName'] || row['elementCode'] }}</td>
+            <td>{{ row['observationDatetime'] }}</td>
+            <td>{{ row['finalDecision'] || row['outcome'] }}</td>
+            <td>{{ row['severity'] }}</td>
+            <td>{{ row['provider'] }}</td>
+            <td>{{ row['explanation'] }}</td>
+            <td>{{ row['recommendedReviewerAction'] || 'Review LMS source record and nearby daily sequence.' }}</td>
+          </tr>
+          <tr *ngIf="lmsGenAiReviewerRows.length === 0">
+            <td colspan="8" class="empty">No GenAI reviewer explanations are available.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="panel-subtitle mt-3">LMS Historical Dataset Preview</div>
     <div class="filter-grid compact-filter-grid">
       <label class="filter-field">Station ID<input type="text" placeholder="Any station" [(ngModel)]="lmsPreviewStationId"></label>
@@ -125,6 +191,9 @@
           </tr>
           <tr *ngIf="!lmsPreviewLoading && lmsPreviewRows.length === 0">
             <td colspan="11" class="empty">No LMS preview loaded. Choose optional filters and click Preview Dataset.</td>
+          </tr>
+          <tr *ngIf="lmsPreviewErrorMessage">
+            <td colspan="11" class="empty">{{ lmsPreviewErrorMessage }}</td>
           </tr>
           <tr *ngIf="lmsPreviewLoading">
             <td colspan="11" class="empty">Loading LMS historical dataset preview...</td>

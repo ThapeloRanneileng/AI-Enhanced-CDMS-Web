@@ -61,6 +61,7 @@ interface QCReviewItem {
   reviewSource: string;
   reviewReason: string;
   recommendedReviewerAction: string;
+  genAiProvider: string;
   reviewerDecision: ReviewerDecision;
   reviewerNotes: string;
   correctedValue: number | null;
@@ -96,6 +97,7 @@ export class QCAssessmentComponent implements OnDestroy {
   protected loadedRuleFailedObservationCount: number = 0;
   protected loadedAnomalyAssessmentCount: number = 0;
   protected emptyWorkspaceMessage: string = 'Try widening the date range or removing some filters.';
+  protected lmsReviewWarningMessage: string = '';
   private allReviewItems: QCReviewItem[] = [];
   private readonly submittingReviewKeys = new Set<string>();
 
@@ -167,6 +169,7 @@ export class QCAssessmentComponent implements OnDestroy {
     this.loadedRuleFailedObservationCount = 0;
     this.loadedAnomalyAssessmentCount = 0;
     this.emptyWorkspaceMessage = 'Try widening the date range or removing some filters.';
+    this.lmsReviewWarningMessage = '';
     this.selectedReviewKey = null;
     this.reviewerNotesDraft = '';
     this.correctedValueDraft = null;
@@ -647,6 +650,7 @@ export class QCAssessmentComponent implements OnDestroy {
           reviewSource: aiAssessment ? 'shared_observation_ai' : (ruleFailed ? 'rule_qc' : 'review_state'),
           reviewReason: aiAssessment?.reasons?.join('; ') ?? failedChecks.join('; ') ?? '',
           recommendedReviewerAction: this.getSuggestedReviewerActionFromAssessment(aiAssessment),
+          genAiProvider: aiAssessment?.externalReviewMetadata?.engineVersion ?? 'Not available',
           reviewerDecision: persistedReview?.decision ?? 'pending',
           reviewerNotes: persistedReview?.notes ?? '',
           correctedValue: persistedReview?.correctedValue ?? null,
@@ -1000,6 +1004,11 @@ export class QCAssessmentComponent implements OnDestroy {
 
     for (let page = 0; page < maxPages; page++) {
       const result = await firstValueFrom(this.lmsAiService.qcReview({ ...lmsQuery, limit: pageSize, offset }).pipe(take(1)));
+      if (result.errorMessage) {
+        this.lmsReviewWarningMessage = 'LMS AI review rows could not be loaded. Existing QC records are still available.';
+        console.warn('[QC Review Workspace] LMS review rows unavailable', result.errorMessage);
+        return rows;
+      }
       rows.push(...result.rows);
 
       if (result.rows.length === 0 || offset + result.rows.length >= result.total) {
@@ -1028,6 +1037,10 @@ export class QCAssessmentComponent implements OnDestroy {
       dateFrom: query.fromDate,
       dateTo: query.toDate,
     };
+
+    if (query.stationIds?.length === 1) {
+      lmsQuery.stationId = query.stationIds[0];
+    }
 
     if (elementCodes.length === 1) {
       lmsQuery.elementCode = elementCodes[0];
@@ -1152,6 +1165,7 @@ export class QCAssessmentComponent implements OnDestroy {
       reviewSource: row['reviewSource'] || 'lms_ai',
       reviewReason: row['reviewReason'] || row['explanation'],
       recommendedReviewerAction: row['recommendedReviewerAction'] || 'Review LMS source record and nearby daily sequence.',
+      genAiProvider: row['provider'] || row['genaiProvider'] || 'Template AI explanation',
       reviewerDecision: persistedReview?.decision ?? 'pending',
       reviewerNotes: persistedReview?.notes ?? '',
       correctedValue: persistedReview?.correctedValue ?? null,

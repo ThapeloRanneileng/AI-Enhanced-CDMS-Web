@@ -57,6 +57,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
         || routePath === '/lms-ai/normalized-observations'
         || routePath === '/lms-ai/rejected-records'
         || routePath === '/lms-ai/predictions'
+        || routePath === '/lms-ai/genai-reviewer-explanations'
       ) {
         return this.handleQualityControlQueryDTO(value as ViewObservationQueryDTO, user.permissions);
       } else {

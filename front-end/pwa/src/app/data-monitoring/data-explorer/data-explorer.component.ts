@@ -48,6 +48,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
     offset: 0,
   };
   protected lmsLoading = false;
+  protected lmsErrorMessage = '';
   private utcOffset!: number;
   private allMetadataLoaded: boolean = false;
 
@@ -248,6 +249,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
 
   protected queryLmsAiOutputs(): void {
     this.lmsLoading = true;
+    this.lmsErrorMessage = '';
     this.lmsAiService.ensemble({
       stationId: this.lmsQuery.stationId || undefined,
       stationName: this.lmsQuery.stationName || undefined,
@@ -266,10 +268,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
       next: result => {
         this.lmsRows = result.rows;
         this.lmsTotal = result.total;
-      },
-      error: err => {
-        this.lmsLoading = false;
-        this.pagesDataService.showToast({ title: 'LMS AI Query', message: err, type: ToastEventTypeEnum.ERROR });
+        this.lmsErrorMessage = result.errorMessage || '';
       },
       complete: () => this.lmsLoading = false,
     });

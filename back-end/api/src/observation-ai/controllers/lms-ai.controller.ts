@@ -37,6 +37,17 @@ export class LmsAiController {
     return this.lmsAiOutputService.getSupervisorSummary();
   }
 
+  @Get('genai-summary')
+  public genAiSummary(@Req() request: Request) {
+    this.assertBroadLmsReportAccess(request);
+    return this.lmsAiOutputService.getGenAiSummary();
+  }
+
+  @Get('genai-reviewer-explanations')
+  public genAiReviewerExplanations(@Query(AuthorisedStationsPipe) query: LmsAiQueryDto) {
+    return this.lmsAiOutputService.getGenAiReviewerExplanations(query);
+  }
+
   @Get('ensemble')
   public ensemble(@Query(AuthorisedStationsPipe) query: LmsAiQueryDto) {
     return this.lmsAiOutputService.getEnsemble(query);
