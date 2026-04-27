@@ -65,3 +65,25 @@ def write_csv(path: Path, rows: Iterable[Dict[str, object]], fieldnames: List[st
         writer.writeheader()
         for row in rows:
             writer.writerow(row)
+
+
+def csv_row_count(path: Path) -> int | None:
+    if not path.exists() or path.suffix.lower() != ".csv":
+        return None
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.reader(handle)
+        try:
+            next(reader)
+        except StopIteration:
+            return 0
+        return sum(1 for _ in reader)
+
+
+def file_metadata(path: Path) -> Dict[str, object]:
+    exists = path.exists()
+    return {
+        "path": str(path),
+        "exists": exists,
+        "sizeBytes": path.stat().st_size if exists else 0,
+        "rowCount": csv_row_count(path) if exists else None,
+    }

@@ -35,10 +35,13 @@ from .models import (
     random_forest_status_rows,
     zscore_predictions,
 )
+from .operations import PROVENANCE_FIELDS, add_provenance, create_run_context, write_manifest, write_supervisor_summary
 from .reporting import generate_model_evaluation_report
 from .visualisations import generate_visualisations
 from .genai import generate_genai_outputs
 
+PREDICTION_OUTPUT_FIELDS = PREDICTION_FIELDS + PROVENANCE_FIELDS
+ENSEMBLE_OUTPUT_FIELDS = ENSEMBLE_FIELDS + PROVENANCE_FIELDS
 QC_HANDOFF_FIELDS = ENSEMBLE_FIELDS + [
     "reviewSource",
     "ruleQcTriggered",
@@ -46,12 +49,12 @@ QC_HANDOFF_FIELDS = ENSEMBLE_FIELDS + [
     "ensembleTriggered",
     "previousReviewTriggered",
     "reviewReason",
-]
+] + PROVENANCE_FIELDS
 
 
-def train_models() -> int:
+def train_models(run_context: Dict[str, object] | None = None) -> int:
     if not NORMALIZED_FILE.exists():
-        prepare()
+        prepare(run_context=run_context)
     normalized = read_csv(NORMALIZED_FILE)
     if not normalized:
         raise ValueError("No normalized LMS observations are available for training. Run prepare and check station mapping and CSV headers.")
@@ -72,9 +75,9 @@ def train_models() -> int:
     return len(train_features)
 
 
-def predict_anomalies(config: AutoencoderConfig | None = None) -> int:
+def predict_anomalies(config: AutoencoderConfig | None = None, run_context: Dict[str, object] | None = None) -> int:
     if not TEST_SPLIT_FILE.exists():
-        train_models()
+        train_models(run_context=run_context)
     test_rows = read_csv(TEST_SPLIT_FILE)
     if not test_rows:
         raise ValueError("No LMS test rows are available for prediction. Run train and check the train/test split.")
@@ -85,23 +88,29 @@ def predict_anomalies(config: AutoencoderConfig | None = None) -> int:
     ae_rows, ae_history_rows, ae_status_rows = autoencoder_predictions(train_rows, test_rows, config)
     rf_status = random_forest_status_rows()
 
-    write_csv(ZSCORE_PREDICTIONS_FILE, z_rows, PREDICTION_FIELDS)
-    write_csv(ISOLATION_FOREST_PREDICTIONS_FILE, if_rows, PREDICTION_FIELDS)
-    write_csv(ONE_CLASS_SVM_PREDICTIONS_FILE, svm_rows, PREDICTION_FIELDS)
-    write_csv(AUTOENCODER_PREDICTIONS_FILE, ae_rows, PREDICTION_FIELDS)
+    z_rows = add_provenance(z_rows, run_context)
+    if_rows = add_provenance(if_rows, run_context)
+    svm_rows = add_provenance(svm_rows, run_context)
+    ae_rows = add_provenance(ae_rows, run_context)
+
+    write_csv(ZSCORE_PREDICTIONS_FILE, z_rows, PREDICTION_OUTPUT_FIELDS)
+    write_csv(ISOLATION_FOREST_PREDICTIONS_FILE, if_rows, PREDICTION_OUTPUT_FIELDS)
+    write_csv(ONE_CLASS_SVM_PREDICTIONS_FILE, svm_rows, PREDICTION_OUTPUT_FIELDS)
+    write_csv(AUTOENCODER_PREDICTIONS_FILE, ae_rows, PREDICTION_OUTPUT_FIELDS)
     write_csv(AUTOENCODER_HISTORY_FILE, ae_history_rows, AUTOENCODER_HISTORY_FIELDS)
     write_csv(AUTOENCODER_STATUS_FILE, ae_status_rows, AUTOENCODER_STATUS_FIELDS)
     write_csv(RANDOM_FOREST_STATUS_FILE, rf_status, ["modelName", "status", "reason", "requiredInput"])
 
     combined = z_rows + if_rows + svm_rows + ae_rows
-    write_csv(COMBINED_PREDICTIONS_FILE, combined, PREDICTION_FIELDS)
+    write_csv(COMBINED_PREDICTIONS_FILE, combined, PREDICTION_OUTPUT_FIELDS)
     ensemble = ensemble_predictions(combined)
-    write_csv(ENSEMBLE_PREDICTIONS_FILE, ensemble, ENSEMBLE_FIELDS)
-    write_qc_handoff(ensemble)
+    ensemble = add_provenance(ensemble, run_context)
+    write_csv(ENSEMBLE_PREDICTIONS_FILE, ensemble, ENSEMBLE_OUTPUT_FIELDS)
+    write_qc_handoff(ensemble, run_context)
     return len(combined)
 
 
-def write_qc_handoff(ensemble_rows: List[Dict[str, object]]) -> None:
+def write_qc_handoff(ensemble_rows: List[Dict[str, object]], run_context: Dict[str, object] | None = None) -> None:
     warnings = read_csv(VALIDATION_WARNINGS_FILE) if VALIDATION_WARNINGS_FILE.exists() else []
     review_rows: List[Dict[str, object]] = []
     for row in ensemble_rows:
@@ -147,6 +156,7 @@ def write_qc_handoff(ensemble_rows: List[Dict[str, object]]) -> None:
                 "previousReviewTriggered": "false",
                 "reviewReason": f"Rule QC selected this row for review: {warning.get('warningType', '')}. {warning.get('message', '')}",
             })
+    review_rows = add_provenance(review_rows, run_context)
     write_csv(QC_HANDOFF_FILE, review_rows, QC_HANDOFF_FIELDS)
 
 
@@ -166,10 +176,15 @@ def insufficient_series_status_rows(summary: List[Dict[str, object]]) -> List[Di
 
 
 def run_all(config: AutoencoderConfig | None = None) -> int:
-    prepare()
-    train_models()
-    prediction_count = predict_anomalies(config)
-    generate_model_evaluation_report()
+    run_context = create_run_context()
+    config = config or AutoencoderConfig()
+    prepare(run_context=run_context)
+    train_models(run_context=run_context)
+    prediction_count = predict_anomalies(config, run_context=run_context)
+    payload = generate_model_evaluation_report()
     generate_visualisations()
     generate_genai_outputs()
+    manifest = write_manifest(run_context, config, prediction_count)
+    write_supervisor_summary(payload, manifest)
+    write_manifest(run_context, config, prediction_count)
     return prediction_count

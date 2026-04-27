@@ -26,6 +26,7 @@ from .config import (
     VALIDATION_WARNINGS_FILE,
 )
 from .io import read_csv, write_csv
+from .operations import PROVENANCE_FIELDS, add_provenance
 
 
 NORMALIZED_FIELDS = [
@@ -44,7 +45,7 @@ NORMALIZED_FIELDS = [
     "isImputed",
     "imputationMethod",
     "qualityFlags",
-]
+] + PROVENANCE_FIELDS
 
 WARNING_FIELDS = ["rowNumber", "stationId", "stationName", "district", "stationType", "observationDatetime", "elementCode", "warningType", "value", "message"]
 REJECTED_FIELDS = ["rowNumber", "id", "stationId", "stationName", "district", "stationType", "year", "month", "day", "observationDatetime", "elementCode", "rawValue", "reason"]
@@ -513,11 +514,12 @@ def inspect(input_path: Path = INPUT_FILE) -> List[Dict[str, object]]:
     return summary
 
 
-def prepare(input_path: Path = INPUT_FILE) -> int:
+def prepare(input_path: Path = INPUT_FILE, run_context: Dict[str, object] | None = None) -> int:
     rows = read_csv(input_path)
     normalized, summary, warnings, rejected, missing_values, duplicate_conflicts, unknown_stations, iqr_outliers, imputed_support, imputation_summary, inspection = normalize_rows(rows)
     if not normalized:
         raise ValueError("No LMS observations were normalized. Check station mapping and CSV headers.")
+    normalized = add_provenance(normalized, run_context, input_path)
     write_csv(NORMALIZED_FILE, normalized, NORMALIZED_FIELDS)
     write_csv(VALIDATION_SUMMARY_FILE, summary, ["metric", "value"])
     write_csv(VALIDATION_WARNINGS_FILE, warnings, WARNING_FIELDS)

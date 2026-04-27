@@ -215,6 +215,73 @@ python3 -m pytest -q
 Note:
 The anomaly engine depends on `numpy` and `scikit-learn`, and the test command depends on `pytest`.
 
+## LMS AI Pipeline
+
+The LMS AI pipeline supports the broader AI-Enhanced Climate Data Management System by preparing historical Lesotho Meteorological Services observations for AI-assisted quality-control review. It validates and normalizes LMS daily CSV observations, creates station-element time-series features, runs baseline anomaly models, trains the TensorFlow/Keras Autoencoder when available, combines model outputs into an ensemble review decision, and writes supervisor-friendly audit outputs.
+
+The AI layer does not automatically decide that values are wrong. It prioritizes unusual observations for human QC review and records evidence such as model agreement, anomaly scores, threshold calibration, explanations, and review reasons.
+
+### Environment
+
+Use the virtual environment under this folder:
+
+```bash
+cd front-end/pwa/aws-ingestion-layer
+PYTHONPATH=src ./.venv/bin/python -m pytest -q tests
+```
+
+### Run Tests
+
+From the repository root:
+
+```bash
+PYTHONPATH=front-end/pwa/aws-ingestion-layer/src front-end/pwa/aws-ingestion-layer/.venv/bin/python -m pytest -q front-end/pwa/aws-ingestion-layer/tests
+```
+
+### Run the Full LMS AI Pipeline
+
+```bash
+cd front-end/pwa/aws-ingestion-layer
+LMS_GENAI_PROVIDER=template PYTHONPATH=src ./.venv/bin/python -m src.lms_ai_pipeline.run_all \
+  --epochs 20 \
+  --batch-size 128 \
+  --patience 5 \
+  --contamination 0.03 \
+  --autoencoder-calibration station_element_quantile \
+  --autoencoder-suspect-quantile 0.99 \
+  --autoencoder-failed-quantile 0.999
+```
+
+Important CLI options:
+
+- `--epochs`: maximum Autoencoder training epochs.
+- `--batch-size`: Autoencoder training batch size.
+- `--patience`: early-stopping patience for Autoencoder training.
+- `--contamination`: expected anomaly proportion used by baseline models and threshold calibration.
+- `--autoencoder-calibration`: Autoencoder threshold mode. Use `station_element_quantile` for station-element thresholds with fallback to element and global thresholds.
+- `--autoencoder-suspect-quantile`: train-error quantile used for SUSPECT Autoencoder thresholds.
+- `--autoencoder-failed-quantile`: train-error quantile used for FAILED Autoencoder thresholds.
+
+### Generated LMS Outputs
+
+LMS generated outputs are written under `front-end/pwa/data/lms/outputs/` and rejected/missing raw-value support files under `front-end/pwa/data/lms/rejected/`.
+
+Key outputs include:
+
+- `lms_all_station_training_input_normalized.csv`: cleaned normalized LMS rows with provenance fields.
+- `lms_zscore_predictions.csv`, `lms_isolation_forest_predictions.csv`, `lms_one_class_svm_predictions.csv`, `lms_autoencoder_predictions.csv`: per-model predictions with explanations and provenance.
+- `lms_ensemble_anomaly_predictions.csv`: ensemble model agreement and final review decision.
+- `lms_qc_review_handoff.csv`: reviewer handoff rows with `reviewSource`, trigger flags, and human-readable `reviewReason`.
+- `lms_model_evaluation_summary.json`, `.csv`, `.md`: model metrics, anomaly rates, station/element summaries, and calibration warnings.
+- `lms_pipeline_run_manifest.json`: run ID, runtime metadata, Git/Python/platform details, input/output file metadata, row counts, and Autoencoder settings.
+- `lms_supervisor_summary.md`: concise supervisor-facing overview of the run, model results, review queue, interpretation notes, and recommended next actions.
+
+Do not commit generated LMS CSVs, reports, charts, model files, or raw data. They should stay under ignored `data/lms/outputs/` or data/rejected locations.
+
+### Troubleshooting TensorFlow CPU/GPU Warnings
+
+TensorFlow may print messages such as missing CUDA drivers, CPU instruction optimization, or failed GPU initialization. These warnings usually mean the run is using CPU instead of GPU. CPU execution is acceptable for local validation; check the Autoencoder status CSV and run manifest to confirm whether training completed. If training is slow, reduce `--epochs`, lower `--batch-size`, or use a machine with a compatible TensorFlow GPU setup.
+
 ## Project Modules
 
 - `src/aws_ingestion.py`: raw AWS ingestion, validation, rejection, and normalization

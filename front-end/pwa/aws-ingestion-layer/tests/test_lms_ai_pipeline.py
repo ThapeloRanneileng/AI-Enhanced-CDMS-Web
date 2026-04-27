@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import csv
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
 from lms_ai_pipeline.core import calculate_feature_rows, inspect_rows, normalize_rows, split_train_test
-from lms_ai_pipeline.io import read_csv
+from lms_ai_pipeline.io import csv_row_count, file_metadata, read_csv
 from lms_ai_pipeline.ensemble import ensemble_predictions
 from lms_ai_pipeline.models import (
     AutoencoderConfig,
@@ -532,6 +533,8 @@ def test_lms_qc_handoff_includes_review_metadata(tmp_path: Path, monkeypatch):
     assert rows[0]["ruleQcTriggered"] == "false"
     assert rows[0]["previousReviewTriggered"] == "false"
     assert "AI ensemble selected this row for review" in rows[0]["reviewReason"]
+    assert rows[0]["sourceSystem"] == "LMS"
+    assert rows[0]["pipelineRunId"] == "manual-run"
 
 
 def test_lms_explainability_text_includes_model_outcome_score_and_action():
@@ -545,6 +548,82 @@ def test_lms_explainability_text_includes_model_outcome_score_and_action():
     assert "outcome=FAILED" in prediction["explanation"]
     assert "anomaly score=3.500000" in prediction["explanation"]
     assert "Recommended reviewer action:" in prediction["explanation"]
+
+
+def test_lms_csv_row_count_helper_counts_data_rows(tmp_path: Path):
+    path = tmp_path / "rows.csv"
+    path.write_text("a,b\n1,2\n3,4\n", encoding="utf-8")
+
+    assert csv_row_count(path) == 2
+
+
+def test_lms_output_file_metadata_handles_missing_files(tmp_path: Path):
+    metadata = file_metadata(tmp_path / "missing.csv")
+
+    assert metadata["exists"] is False
+    assert metadata["sizeBytes"] == 0
+    assert metadata["rowCount"] is None
+
+
+def test_lms_manifest_and_supervisor_summary_generation(tmp_path: Path, monkeypatch):
+    from lms_ai_pipeline import operations
+
+    input_file = tmp_path / "NULClimsofttext.csv"
+    normalized = tmp_path / "normalized.csv"
+    rejected = tmp_path / "rejected.csv"
+    warnings = tmp_path / "warnings.csv"
+    qc = tmp_path / "handoff.csv"
+    ae_status = tmp_path / "ae_status.csv"
+    manifest_file = tmp_path / "manifest.json"
+    supervisor_file = tmp_path / "supervisor.md"
+    input_file.write_text("id,year,month,day,rain,tmax,tmin\nLESBUT01,2020,1,1,1,20,10\n", encoding="utf-8")
+    normalized.write_text("stationId\nLESBUT01\n", encoding="utf-8")
+    rejected.write_text("stationId\n", encoding="utf-8")
+    warnings.write_text("warningType\nIQR_OUTLIER\n", encoding="utf-8")
+    qc.write_text("stationId,outcome\nLESBUT01,SUSPECT\n", encoding="utf-8")
+    ae_status.write_text("modelName,status,calibrationMode\nAutoencoder,trained,station_element_quantile\n", encoding="utf-8")
+
+    monkeypatch.setattr(operations, "INPUT_FILE", input_file)
+    monkeypatch.setattr(operations, "NORMALIZED_FILE", normalized)
+    monkeypatch.setattr(operations, "REJECTED_VALUES_FILE", rejected)
+    monkeypatch.setattr(operations, "VALIDATION_WARNINGS_FILE", warnings)
+    monkeypatch.setattr(operations, "QC_HANDOFF_FILE", qc)
+    monkeypatch.setattr(operations, "AUTOENCODER_STATUS_FILE", ae_status)
+    monkeypatch.setattr(operations, "PIPELINE_RUN_MANIFEST_FILE", manifest_file)
+    monkeypatch.setattr(operations, "SUPERVISOR_SUMMARY_FILE", supervisor_file)
+    monkeypatch.setattr(operations, "input_file_paths", lambda: [input_file])
+    monkeypatch.setattr(operations, "output_file_paths", lambda: [normalized, rejected, warnings, qc, ae_status, supervisor_file, manifest_file])
+    monkeypatch.setattr(operations, "safe_git_value", lambda args: "test-git")
+    run_context = {"runId": "run-1", "runStartedAt": "2026-04-27T00:00:00Z", "processedAt": "2026-04-27T00:00:00Z", "startedMonotonic": 1.0}
+    monkeypatch.setattr(operations.time, "monotonic", lambda: 3.5)
+    config = AutoencoderConfig(epochs=3, batch_size=16, contamination=0.02, calibration="station_element_quantile")
+
+    manifest = operations.write_manifest(run_context, config, total_prediction_rows=12)
+    payload = {
+        "modelMetrics": {"Ensemble": {"totalRows": 4, "normalCount": 2, "suspectCount": 1, "failedCount": 1, "anomalyCount": 2, "anomalyRate": 0.5}},
+        "autoencoderStatus": [{"globalSuspectThreshold": "1.0", "globalFailedThreshold": "2.0", "calibrationMode": "station_element_quantile"}],
+        "stationAnomalyRates": [{"stationId": "LESBUT01", "anomalyCount": 2, "anomalyRate": 0.5}],
+        "elementAnomalyRates": [{"elementCode": "rain", "anomalyCount": 2, "anomalyRate": 0.5}],
+        "topStationElementPairs": [{"stationId": "LESBUT01", "elementCode": "rain", "anomalyCount": 2, "anomalyRate": 0.5}],
+        "calibrationWarnings": [],
+    }
+    markdown = operations.write_supervisor_summary(payload, manifest)
+
+    loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
+    assert manifest_file.exists()
+    assert loaded["runId"] == "run-1"
+    assert loaded["runStartedAt"] == "2026-04-27T00:00:00Z"
+    assert loaded["runFinishedAt"]
+    assert loaded["runtimeSeconds"] == 2.5
+    assert loaded["inputFiles"][0]["rowCount"] == 1
+    assert loaded["outputFiles"]
+    assert loaded["totalPredictionRows"] == 12
+    assert loaded["qcReviewRows"] == 1
+    assert supervisor_file.exists()
+    assert "## Pipeline Run Overview" in markdown
+    assert "## AI Model Summary" in markdown
+    assert "## QC Review Handoff Summary" in markdown
+    assert "## Next Recommended Actions" in markdown
 
 
 def test_lms_visualisation_output_paths(monkeypatch, tmp_path: Path):
