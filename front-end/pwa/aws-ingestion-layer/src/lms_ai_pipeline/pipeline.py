@@ -39,6 +39,15 @@ from .reporting import generate_model_evaluation_report
 from .visualisations import generate_visualisations
 from .genai import generate_genai_outputs
 
+QC_HANDOFF_FIELDS = ENSEMBLE_FIELDS + [
+    "reviewSource",
+    "ruleQcTriggered",
+    "aiTriggered",
+    "ensembleTriggered",
+    "previousReviewTriggered",
+    "reviewReason",
+]
+
 
 def train_models() -> int:
     if not NORMALIZED_FILE.exists():
@@ -97,7 +106,20 @@ def write_qc_handoff(ensemble_rows: List[Dict[str, object]]) -> None:
     review_rows: List[Dict[str, object]] = []
     for row in ensemble_rows:
         if row["outcome"] in {"SUSPECT", "FAILED"}:
-            review_rows.append({**row, "reviewReason": "MODEL_ANOMALY"})
+            agreeing_models = str(row.get("agreeingModels", ""))
+            review_rows.append({
+                **row,
+                "reviewSource": "ai_ensemble",
+                "ruleQcTriggered": "false",
+                "aiTriggered": "true",
+                "ensembleTriggered": "true",
+                "previousReviewTriggered": "false",
+                "reviewReason": (
+                    f"AI ensemble selected this row for review because outcome={row.get('outcome', '')}, "
+                    f"score={row.get('anomalyScore', '')}, agreement={row.get('modelAgreementCount', 0)} model(s)"
+                    f"{f' ({agreeing_models})' if agreeing_models else ''}."
+                ),
+            })
     for warning in warnings:
         if warning.get("warningType") in {"TMIN_GREATER_THAN_TMAX", "NEGATIVE_RAINFALL", "EXTREME_VALUE", "IQR_OUTLIER", "SUSPICIOUS_CONSTANT_SEQUENCE", "DUPLICATE_CONFLICT"}:
             review_rows.append({
@@ -118,9 +140,14 @@ def write_qc_handoff(ensemble_rows: List[Dict[str, object]]) -> None:
                 "outcome": "SUSPECT",
                 "explanation": warning.get("message", ""),
                 "recommendedReviewerAction": "Check LMS source record before approval.",
-                "reviewReason": warning.get("warningType", ""),
+                "reviewSource": "rule_qc",
+                "ruleQcTriggered": "true",
+                "aiTriggered": "false",
+                "ensembleTriggered": "false",
+                "previousReviewTriggered": "false",
+                "reviewReason": f"Rule QC selected this row for review: {warning.get('warningType', '')}. {warning.get('message', '')}",
             })
-    write_csv(QC_HANDOFF_FILE, review_rows, ENSEMBLE_FIELDS + ["reviewReason"])
+    write_csv(QC_HANDOFF_FILE, review_rows, QC_HANDOFF_FIELDS)
 
 
 def insufficient_series_status_rows(summary: List[Dict[str, object]]) -> List[Dict[str, object]]:

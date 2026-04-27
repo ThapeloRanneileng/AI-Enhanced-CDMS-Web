@@ -451,9 +451,15 @@ def test_lms_report_summary_generation(tmp_path: Path, monkeypatch):
     )
     (tmp_path / "ae_history.csv").write_text("epoch,loss,validationLoss\n1,0.2,0.3\n2,0.1,0.2\n", encoding="utf-8")
     for name in ["lms_zscore_predictions.csv", "lms_isolation_forest_predictions.csv", "lms_one_class_svm_predictions.csv", "lms_autoencoder_predictions.csv"]:
-        (tmp_path / name).write_text("stationId,outcome,anomalyScore\nLESBUT01,NORMAL,0.1\n", encoding="utf-8")
-    (tmp_path / "lms_autoencoder_predictions.csv").write_text("stationId,outcome,anomalyScore\nLESBUT01,FAILED,5.0\n", encoding="utf-8")
-    (tmp_path / "ensemble.csv").write_text("stationId,observationDatetime,elementCode,value,finalDecision,outcome,severity,modelAgreementCount,anomalyScore\nLESBUT01,2020-01-01,rain,1,FAILED,FAILED,HIGH,2,5\n", encoding="utf-8")
+        (tmp_path / name).write_text("stationId,elementCode,outcome,anomalyScore\nLESBUT01,rain,NORMAL,0.1\nLESLER01,rain,SUSPECT,2.0\n", encoding="utf-8")
+    (tmp_path / "lms_autoencoder_predictions.csv").write_text("stationId,elementCode,outcome,anomalyScore\nLESBUT01,rain,FAILED,5.0\nLESBUT01,tmax,NORMAL,0.2\n", encoding="utf-8")
+    (tmp_path / "ensemble.csv").write_text(
+        "stationId,observationDatetime,elementCode,value,finalDecision,outcome,severity,modelAgreementCount,anomalyScore\n"
+        "LESBUT01,2020-01-01,rain,1,FAILED,FAILED,HIGH,2,5\n"
+        "LESBUT01,2020-01-02,tmax,20,NORMAL,NORMAL,LOW,0,0.1\n"
+        "LESLER01,2020-01-01,rain,3,SUSPECT,SUSPECT,MEDIUM,1,2\n",
+        encoding="utf-8",
+    )
 
     payload = reporting.generate_model_evaluation_report()
 
@@ -464,9 +470,81 @@ def test_lms_report_summary_generation(tmp_path: Path, monkeypatch):
     assert payload["autoencoderCalibrationMode"] == "station_element_quantile"
     assert payload["autoencoderSuspectThreshold"] == "1.0"
     assert payload["autoencoderFailedThreshold"] == "2.0"
-    assert payload["anomalyRatePerModel"]["Autoencoder"] == 1.0
+    assert payload["anomalyRatePerModel"]["Autoencoder"] == 0.5
+    assert payload["modelMetrics"]["Autoencoder"]["totalRows"] == 2
+    assert payload["modelMetrics"]["Autoencoder"]["anomalyCount"] == 1
+    assert payload["modelMetrics"]["Autoencoder"]["anomalyRate"] == 0.5
+    assert payload["modelMetrics"]["Autoencoder"]["averageAnomalyScore"] == 2.6
+    assert payload["modelMetrics"]["Autoencoder"]["maxAnomalyScore"] == 5.0
+    station_rates = {row["stationId"]: row for row in payload["stationAnomalyRates"]}
+    assert station_rates["LESBUT01"]["anomalyCount"] == 1
+    assert station_rates["LESBUT01"]["anomalyRate"] == 0.5
+    assert station_rates["LESLER01"]["anomalyRate"] == 1.0
+    element_rates = {row["elementCode"]: row for row in payload["elementAnomalyRates"]}
+    assert element_rates["rain"]["anomalyCount"] == 2
+    assert element_rates["rain"]["anomalyRate"] == 1.0
+    assert element_rates["tmax"]["anomalyRate"] == 0.0
+    assert payload["topStationElementPairs"]
+    assert {"stationId", "elementCode", "anomalyRate", "anomalyCount"}.issubset(payload["topStationElementPairs"][0])
     assert any("threshold calibration requires review" in warning for warning in payload["calibrationWarnings"])
-    assert "## Calibration Warnings" in files["MODEL_EVALUATION_SUMMARY_MD"].read_text(encoding="utf-8")
+    markdown = files["MODEL_EVALUATION_SUMMARY_MD"].read_text(encoding="utf-8")
+    assert "## Calibration Warnings" in markdown
+    assert "## Per-Model Metrics" in markdown
+    assert "## Station And Element Summaries" in markdown
+
+
+def test_lms_qc_handoff_includes_review_metadata(tmp_path: Path, monkeypatch):
+    handoff = tmp_path / "handoff.csv"
+    warnings = tmp_path / "warnings.csv"
+    warnings.write_text("warningType,stationId,message\n", encoding="utf-8")
+    monkeypatch.setattr(pipeline, "QC_HANDOFF_FILE", handoff)
+    monkeypatch.setattr(pipeline, "VALIDATION_WARNINGS_FILE", warnings)
+    row = {
+        "stationId": "LESBUT01",
+        "stationName": "BUTHA-BUTHE",
+        "district": "BUTHA-BUTHE",
+        "stationType": "CLIMATE",
+        "observationDatetime": "2020-01-01",
+        "elementCode": "rain",
+        "elementName": "Rainfall",
+        "value": "10",
+        "unit": "mm",
+        "contributingModels": "Z-score;Autoencoder",
+        "modelAgreementCount": 2,
+        "modelAgreementRatio": "0.500000",
+        "agreeingModels": "Z-score;Autoencoder",
+        "anomalyScore": "5.0",
+        "confidence": "0.85",
+        "severity": "HIGH",
+        "finalDecision": "FAILED",
+        "outcome": "FAILED",
+        "explanation": "Model Ensemble outcome=FAILED",
+        "recommendedReviewerAction": "Review LMS source record.",
+    }
+
+    pipeline.write_qc_handoff([row])
+
+    with handoff.open("r", encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["reviewSource"] == "ai_ensemble"
+    assert rows[0]["aiTriggered"] == "true"
+    assert rows[0]["ensembleTriggered"] == "true"
+    assert rows[0]["ruleQcTriggered"] == "false"
+    assert rows[0]["previousReviewTriggered"] == "false"
+    assert "AI ensemble selected this row for review" in rows[0]["reviewReason"]
+
+
+def test_lms_explainability_text_includes_model_outcome_score_and_action():
+    row = feature_row(1, value=42.0)
+    row["z_score"] = "3.500000"
+    row["seasonal_z_score"] = "3.200000"
+
+    prediction = zscore_predictions([row])[0]
+
+    assert "Model Z-score" in prediction["explanation"]
+    assert "outcome=FAILED" in prediction["explanation"]
+    assert "anomaly score=3.500000" in prediction["explanation"]
+    assert "Recommended reviewer action:" in prediction["explanation"]
 
 
 def test_lms_visualisation_output_paths(monkeypatch, tmp_path: Path):

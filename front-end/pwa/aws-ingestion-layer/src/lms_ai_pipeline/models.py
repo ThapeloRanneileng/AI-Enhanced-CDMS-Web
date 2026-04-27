@@ -61,6 +61,31 @@ def reviewer_action(outcome: str) -> str:
     return "No reviewer action required."
 
 
+def build_model_explanation(
+    row: Dict[str, object],
+    model_name: str,
+    score: float,
+    outcome: str,
+    reason: str,
+    suspect_threshold: float | None = None,
+    failed_threshold: float | None = None,
+    calibration_mode: str | None = None,
+) -> str:
+    threshold_parts = []
+    if suspect_threshold is not None:
+        threshold_parts.append(f"suspect threshold={suspect_threshold:.6f}")
+    if failed_threshold is not None:
+        threshold_parts.append(f"failed threshold={failed_threshold:.6f}")
+    threshold_text = f" Thresholds used: {', '.join(threshold_parts)}." if threshold_parts else " Threshold used: model decision boundary or z-score policy."
+    calibration_text = f" Calibration mode: {calibration_mode}." if calibration_mode else ""
+    return (
+        f"Model {model_name} outcome={outcome} for {row.get('elementName', row.get('elementCode', 'observation'))} "
+        f"at {row.get('stationName', row.get('stationId', 'station'))} on {row.get('observationDatetime', '')}; "
+        f"anomaly score={score:.6f}.{threshold_text}{calibration_text} "
+        f"Flag reason: {reason} Recommended reviewer action: {reviewer_action(outcome)}"
+    )
+
+
 def build_prediction(row: Dict[str, object], model_name: str, score: float, outcome: str, severity: str, confidence: str, explanation: str) -> Dict[str, object]:
     return {
         "stationId": row["stationId"],
@@ -89,9 +114,15 @@ def zscore_predictions(feature_rows: Sequence[Dict[str, object]]) -> List[Dict[s
         seasonal_z = float(row["seasonal_z_score"])
         chosen = seasonal_z if abs(seasonal_z) >= abs(z_score) else z_score
         outcome, severity, confidence = outcome_from_z(chosen)
-        explanation = (
-            f"{row['elementName']} value {row['value']} has z_score={z_score:.2f} "
-            f"and seasonal_z_score={seasonal_z:.2f} for {row['stationName']}."
+        explanation = build_model_explanation(
+            row,
+            "Z-score",
+            abs(chosen),
+            outcome,
+            (
+                f"value {row['value']} has z_score={z_score:.2f} and seasonal_z_score={seasonal_z:.2f}; "
+                "the larger absolute z-score drives the outcome."
+            ),
         )
         predictions.append(build_prediction(row, "Z-score", abs(chosen), outcome, severity, confidence, explanation))
     return predictions
@@ -161,9 +192,12 @@ def distance_predictions(feature_rows: Sequence[Dict[str, object]], model_name: 
         for row, value in zip(series, values):
             score = ((value - center) / spread) if spread else value
             outcome, severity, confidence = outcome_from_z(score)
-            explanation = (
-                f"{model_name} fallback used because scikit-learn is unavailable; "
-                f"score is based on seasonal z-score distance."
+            explanation = build_model_explanation(
+                row,
+                model_name,
+                abs(score),
+                outcome,
+                "fallback seasonal z-score distance was used because scikit-learn is unavailable or the row limit was exceeded.",
             )
             predictions.append(build_prediction(row, model_name, abs(score), outcome, severity, confidence, explanation))
     return predictions
@@ -186,7 +220,14 @@ def isolation_forest_predictions(feature_rows: Sequence[Dict[str, object]], cont
     for row, label, score in zip(feature_rows, labels, scores):
         outcome = "SUSPECT" if int(label) == -1 else "NORMAL"
         severity = "MEDIUM" if outcome == "SUSPECT" else "LOW"
-        predictions.append(build_prediction(row, "Isolation Forest", float(score), outcome, severity, "0.70", "Isolation Forest scored the row in feature space."))
+        explanation = build_model_explanation(
+            row,
+            "Isolation Forest",
+            float(score),
+            outcome,
+            "Isolation Forest scored the observation against the learned feature-space isolation boundary.",
+        )
+        predictions.append(build_prediction(row, "Isolation Forest", float(score), outcome, severity, "0.70", explanation))
     return predictions
 
 
@@ -207,7 +248,14 @@ def one_class_svm_predictions(feature_rows: Sequence[Dict[str, object]], nu: flo
     for row, label, score in zip(feature_rows, labels, scores):
         outcome = "SUSPECT" if int(label) == -1 else "NORMAL"
         severity = "MEDIUM" if outcome == "SUSPECT" else "LOW"
-        predictions.append(build_prediction(row, "One-Class SVM", float(score), outcome, severity, "0.70", "One-Class SVM scored the row against the learned normal boundary."))
+        explanation = build_model_explanation(
+            row,
+            "One-Class SVM",
+            float(score),
+            outcome,
+            "One-Class SVM scored the observation against the learned normal boundary.",
+        )
+        predictions.append(build_prediction(row, "One-Class SVM", float(score), outcome, severity, "0.70", explanation))
     return predictions
 
 
@@ -472,10 +520,15 @@ def autoencoder_predictions(
         denominator = failed_threshold if outcome == "FAILED" else suspect_threshold
         ratio = score / denominator if denominator > 0 else score
         confidence = f"{min(0.99, max(0.50, 0.50 + (ratio * 0.35))):.2f}"
-        explanation = (
-            f"Autoencoder reconstruction error is {score:.6f}; suspect threshold is "
-            f"{suspect_threshold:.6f} and failed threshold is {failed_threshold:.6f} "
-            f"using {threshold_mode} calibration."
+        explanation = build_model_explanation(
+            row,
+            "Autoencoder",
+            score,
+            outcome,
+            "reconstruction error was compared with calibrated train-error quantile thresholds.",
+            suspect_threshold,
+            failed_threshold,
+            threshold_mode,
         )
         predictions.append(build_prediction(row, "Autoencoder", score, outcome, severity, confidence, explanation))
 

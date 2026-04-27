@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, List, Sequence
 
@@ -45,6 +45,74 @@ def anomaly_rows(rows: Sequence[Dict[str, str]]) -> List[Dict[str, str]]:
     return [row for row in rows if row.get("finalDecision", row.get("outcome", "")) in {"SUSPECT", "FAILED"}]
 
 
+def safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return default
+
+
+def model_metrics(rows: Sequence[Dict[str, str]]) -> Dict[str, object]:
+    total = len(rows)
+    counts = decision_counts(rows)
+    anomaly_count = counts.get("SUSPECT", 0) + counts.get("FAILED", 0)
+    scores = [safe_float(row.get("anomalyScore")) for row in rows]
+    return {
+        "totalRows": total,
+        "normalCount": counts.get("NORMAL", 0),
+        "suspectCount": counts.get("SUSPECT", 0),
+        "failedCount": counts.get("FAILED", 0),
+        "anomalyCount": anomaly_count,
+        "anomalyRate": anomaly_count / total if total else 0.0,
+        "averageAnomalyScore": sum(scores) / total if total else 0.0,
+        "maxAnomalyScore": max(scores) if scores else 0.0,
+    }
+
+
+def rate_summary(rows: Sequence[Dict[str, str]], key_field: str) -> List[Dict[str, object]]:
+    totals: Counter[str] = Counter()
+    anomalies: Counter[str] = Counter()
+    for row in rows:
+        key = row.get(key_field, "")
+        totals[key] += 1
+        if row.get("finalDecision", row.get("outcome", "")) in {"SUSPECT", "FAILED"}:
+            anomalies[key] += 1
+    return [
+        {
+            key_field: key,
+            "totalRows": totals[key],
+            "anomalyCount": anomalies[key],
+            "anomalyRate": anomalies[key] / totals[key] if totals[key] else 0.0,
+        }
+        for key in sorted(totals)
+    ]
+
+
+def top_station_element_pairs(rows: Sequence[Dict[str, str]], limit: int = 10) -> List[Dict[str, object]]:
+    totals: Counter[tuple[str, str]] = Counter()
+    anomalies: Counter[tuple[str, str]] = Counter()
+    max_scores: defaultdict[tuple[str, str], float] = defaultdict(float)
+    for row in rows:
+        key = (row.get("stationId", ""), row.get("elementCode", ""))
+        totals[key] += 1
+        score = safe_float(row.get("anomalyScore"))
+        if row.get("finalDecision", row.get("outcome", "")) in {"SUSPECT", "FAILED"}:
+            anomalies[key] += 1
+            max_scores[key] = max(max_scores[key], score)
+    pairs = [
+        {
+            "stationId": station_id,
+            "elementCode": element_code,
+            "totalRows": totals[(station_id, element_code)],
+            "anomalyCount": anomalies[(station_id, element_code)],
+            "anomalyRate": anomalies[(station_id, element_code)] / totals[(station_id, element_code)] if totals[(station_id, element_code)] else 0.0,
+            "maxAnomalyScore": max_scores[(station_id, element_code)],
+        }
+        for station_id, element_code in totals
+    ]
+    return sorted(pairs, key=lambda row: (float(row["anomalyRate"]), int(row["anomalyCount"]), float(row["maxAnomalyScore"])), reverse=True)[:limit]
+
+
 def load_prediction_rows(output_dir: Path) -> Dict[str, List[Dict[str, str]]]:
     files = {
         "Z-score": output_dir / "lms_zscore_predictions.csv",
@@ -82,10 +150,8 @@ def build_report_payload() -> Dict[str, object]:
     prediction_rows = load_prediction_rows(MODEL_EVALUATION_SUMMARY_CSV.parent)
     ensemble = prediction_rows["Ensemble"]
     anomalies = anomaly_rows(ensemble)
-    anomaly_rates = {
-        name: (len(anomaly_rows(rows)) / len(rows) if rows else 0.0)
-        for name, rows in prediction_rows.items()
-    }
+    metrics = {name: model_metrics(rows) for name, rows in prediction_rows.items()}
+    anomaly_rates = {name: values["anomalyRate"] for name, values in metrics.items()}
     calibration_status = autoencoder_status[0] if autoencoder_status else {}
     warnings = []
     if float(anomaly_rates.get("Autoencoder", 0.0)) > 0.20:
@@ -101,9 +167,13 @@ def build_report_payload() -> Dict[str, object]:
         "modelStatus": model_status,
         "rowsPredictedPerModel": {name: len(rows) for name, rows in prediction_rows.items()},
         "decisionCountsPerModel": {name: decision_counts(rows) for name, rows in prediction_rows.items()},
+        "modelMetrics": metrics,
         "anomalyRatePerModel": anomaly_rates,
         "stationAnomalyCounts": count_by(anomalies, "stationId"),
+        "stationAnomalyRates": rate_summary(ensemble, "stationId"),
         "elementAnomalyCounts": count_by(anomalies, "elementCode"),
+        "elementAnomalyRates": rate_summary(ensemble, "elementCode"),
+        "topStationElementPairs": top_station_element_pairs(ensemble),
         "modelAgreementDistribution": count_by(ensemble, "modelAgreementCount"),
         "topAnomalyExamples": top_anomaly_examples(ensemble),
         "autoencoderStatus": autoencoder_status,
@@ -136,10 +206,25 @@ def payload_to_summary_rows(payload: Dict[str, object]) -> List[Dict[str, object
         add_count_rows(rows, "models", f"{name} decisionCounts", dict(counts))
     for name, rate in dict(payload["anomalyRatePerModel"]).items():
         rows.append({"section": "models", "metric": "anomalyRate", "key": name, "value": f"{float(rate):.6f}"})
+    for name, metrics in dict(payload["modelMetrics"]).items():
+        for metric, value in dict(metrics).items():
+            formatted = f"{float(value):.6f}" if metric in {"anomalyRate", "averageAnomalyScore", "maxAnomalyScore"} else value
+            rows.append({"section": "modelMetrics", "metric": metric, "key": name, "value": formatted})
     for warning in payload.get("calibrationWarnings", []):
         rows.append({"section": "warnings", "metric": "highAnomalyRate", "key": "calibration", "value": warning})
     add_count_rows(rows, "stations", "anomalyCounts", dict(payload["stationAnomalyCounts"]))
     add_count_rows(rows, "elements", "anomalyCounts", dict(payload["elementAnomalyCounts"]))
+    for row in payload["stationAnomalyRates"]:
+        rows.append({"section": "stations", "metric": "anomalyRate", "key": row["stationId"], "value": f"{float(row['anomalyRate']):.6f}"})
+    for row in payload["elementAnomalyRates"]:
+        rows.append({"section": "elements", "metric": "anomalyRate", "key": row["elementCode"], "value": f"{float(row['anomalyRate']):.6f}"})
+    for row in payload["topStationElementPairs"]:
+        rows.append({
+            "section": "stationElementPairs",
+            "metric": "topRisk",
+            "key": f"{row['stationId']}/{row['elementCode']}",
+            "value": f"anomalyCount={row['anomalyCount']}; anomalyRate={float(row['anomalyRate']):.6f}; maxAnomalyScore={float(row['maxAnomalyScore']):.6f}",
+        })
     add_count_rows(rows, "ensemble", "modelAgreementDistribution", dict(payload["modelAgreementDistribution"]))
     return rows
 
@@ -162,6 +247,31 @@ def build_markdown(payload: Dict[str, object]) -> str:
     lines.extend(["", "## Anomaly Rates"])
     for name, rate in dict(payload["anomalyRatePerModel"]).items():
         lines.append(f"- {name}: {float(rate):.4f}")
+    lines.extend(["", "## Per-Model Metrics"])
+    for name, metrics in dict(payload["modelMetrics"]).items():
+        lines.append(
+            f"- {name}: total={metrics['totalRows']}; normal={metrics['normalCount']}; suspect={metrics['suspectCount']}; "
+            f"failed={metrics['failedCount']}; anomalies={metrics['anomalyCount']}; rate={float(metrics['anomalyRate']):.4f}; "
+            f"avg_score={float(metrics['averageAnomalyScore']):.6f}; max_score={float(metrics['maxAnomalyScore']):.6f}"
+        )
+    lines.extend(["", "## Station And Element Summaries", "### Station Anomaly Rates"])
+    for row in payload["stationAnomalyRates"]:
+        lines.append(f"- {row['stationId']}: anomalies={row['anomalyCount']}; total={row['totalRows']}; rate={float(row['anomalyRate']):.4f}")
+    if not payload["stationAnomalyRates"]:
+        lines.append("- None")
+    lines.append("### Element Anomaly Rates")
+    for row in payload["elementAnomalyRates"]:
+        lines.append(f"- {row['elementCode']}: anomalies={row['anomalyCount']}; total={row['totalRows']}; rate={float(row['anomalyRate']):.4f}")
+    if not payload["elementAnomalyRates"]:
+        lines.append("- None")
+    lines.append("### Top 10 Station-Element Pairs")
+    for row in payload["topStationElementPairs"]:
+        lines.append(
+            f"- {row['stationId']} / {row['elementCode']}: anomalies={row['anomalyCount']}; total={row['totalRows']}; "
+            f"rate={float(row['anomalyRate']):.4f}; max_score={float(row['maxAnomalyScore']):.6f}"
+        )
+    if not payload["topStationElementPairs"]:
+        lines.append("- None")
     lines.extend(["", "## Autoencoder"])
     for status in payload["autoencoderStatus"]:
         lines.append(f"- Status: {status.get('status', '')}; epochs={status.get('epochs', '')}; batch_size={status.get('batchSize', '')}; validation_split={status.get('validationSplit', '')}; patience={status.get('patience', '')}; contamination={status.get('contamination', '')}")

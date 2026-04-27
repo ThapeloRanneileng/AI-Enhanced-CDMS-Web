@@ -37,6 +37,13 @@ def ensemble_predictions(model_rows: Sequence[Dict[str, object]]) -> List[Dict[s
             outcome, severity, confidence = ("FAILED", "HIGH", "0.85") if failed else ("SUSPECT", "MEDIUM", "0.75")
         else:
             outcome, severity, confidence = ("FAILED", "HIGH", "0.95") if failed else ("SUSPECT", "HIGH", "0.90")
+        score = max((float(row["anomalyScore"]) for row in flagged), default=0.0)
+        action = "Review LMS source record and nearby daily sequence." if outcome != "NORMAL" else "No reviewer action required."
+        reason = (
+            f"{agreement_count} of {len(rows)} contributing model(s) flagged this observation"
+            if agreement_count
+            else "no contributing models flagged this observation"
+        )
         output.append({
             "stationId": first["stationId"],
             "stationName": first["stationName"],
@@ -51,12 +58,17 @@ def ensemble_predictions(model_rows: Sequence[Dict[str, object]]) -> List[Dict[s
             "modelAgreementCount": agreement_count,
             "modelAgreementRatio": f"{agreement_ratio:.6f}",
             "agreeingModels": ";".join(str(row["modelName"]) for row in flagged),
-            "anomalyScore": max((float(row["anomalyScore"]) for row in flagged), default=0.0),
+            "anomalyScore": score,
             "confidence": confidence,
             "severity": severity,
             "finalDecision": outcome,
             "outcome": outcome,
-            "explanation": f"{agreement_count} model(s) flagged this observation; ensemble outcome is {outcome}.",
-            "recommendedReviewerAction": "Review LMS source record and nearby daily sequence." if outcome != "NORMAL" else "No reviewer action required.",
+            "explanation": (
+                f"Model Ensemble outcome={outcome}; anomaly score={score:.6f}; "
+                f"threshold used=at least one SUSPECT/FAILED contributing model for review. "
+                f"Flag reason: {reason}; agreeing models={';'.join(str(row['modelName']) for row in flagged) or 'none'}. "
+                f"Recommended reviewer action: {action}"
+            ),
+            "recommendedReviewerAction": action,
         })
     return output
