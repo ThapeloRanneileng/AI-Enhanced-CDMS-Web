@@ -52,6 +52,11 @@ export class AuthorisedStationsPipe implements PipeTransform {
         || routePath === '/review-workspace/count'
         || routePath === '/observation-anomaly-assessments/review-workspace'
         || routePath === '/observation-anomaly-assessments/review-workspace/count'
+        || routePath === '/lms-ai/qc-review'
+        || routePath === '/lms-ai/ensemble'
+        || routePath === '/lms-ai/normalized-observations'
+        || routePath === '/lms-ai/rejected-records'
+        || routePath === '/lms-ai/predictions'
       ) {
         return this.handleQualityControlQueryDTO(value as ViewObservationQueryDTO, user.permissions);
       } else {

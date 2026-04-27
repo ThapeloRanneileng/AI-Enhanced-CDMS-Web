@@ -18,6 +18,7 @@ import { ObservationAnomalyAssessmentsService } from '../services/observation-an
 import { StringUtils } from 'src/app/shared/utils/string.utils';
 import { AppAuthService } from 'src/app/app-auth.service';
 import { QCReviewWorkflowService } from '../services/qc-review-workflow.service';
+import { LmsAiQuery, LmsAiService } from '../services/lms-ai.service';
 
 type ReviewerDecision = 'pending' | 'approved' | 'overridden' | 'escalated';
 
@@ -57,6 +58,9 @@ interface QCReviewItem {
   aiAssessment: ViewObservationAnomalyAssessmentModel | null;
   aiConfidence: number | null;
   aiExplanation: string;
+  reviewSource: string;
+  reviewReason: string;
+  recommendedReviewerAction: string;
   reviewerDecision: ReviewerDecision;
   reviewerNotes: string;
   correctedValue: number | null;
@@ -105,6 +109,7 @@ export class QCAssessmentComponent implements OnDestroy {
     private qcAssessmentsService: QCAssessmentsService,
     private observationAnomalyAssessmentsService: ObservationAnomalyAssessmentsService,
     private qcReviewWorkflowService: QCReviewWorkflowService,
+    private lmsAiService: LmsAiService,
   ) {
     this.pagesDataService.setPageHeader('QC Review Workspace');
     this.pageInputDefinition.setPageSize(18);
@@ -523,15 +528,17 @@ export class QCAssessmentComponent implements OnDestroy {
         qcStatus: undefined,
       };
 
-      const [allObservations, allAnomalyAssessments, reviewState] = await Promise.all([
+      const [allObservations, allAnomalyAssessments, lmsReviewRows, reviewState] = await Promise.all([
         this.fetchAllObservations(baseQuery),
         this.fetchAllAnomalyAssessments(baseQuery),
+        this.fetchLmsReviewRows(baseQuery),
         this.loadReviewState(),
       ]);
 
       console.info('[QC Review Workspace] Unified review source counts', {
         processedObservationsCount: allObservations.length,
         anomalyAssessmentsCount: allAnomalyAssessments.length,
+        lmsReviewRowsCount: lmsReviewRows.length,
         persistedReviewCount: Object.keys(reviewState.reviews).length,
       });
 
@@ -637,6 +644,9 @@ export class QCAssessmentComponent implements OnDestroy {
           aiAssessment,
           aiConfidence: this.getAIConfidence(aiAssessment),
           aiExplanation: this.getAIExplanation(aiAssessment),
+          reviewSource: aiAssessment ? 'shared_observation_ai' : (ruleFailed ? 'rule_qc' : 'review_state'),
+          reviewReason: aiAssessment?.reasons?.join('; ') ?? failedChecks.join('; ') ?? '',
+          recommendedReviewerAction: this.getSuggestedReviewerActionFromAssessment(aiAssessment),
           reviewerDecision: persistedReview?.decision ?? 'pending',
           reviewerNotes: persistedReview?.notes ?? '',
           correctedValue: persistedReview?.correctedValue ?? null,
@@ -645,6 +655,12 @@ export class QCAssessmentComponent implements OnDestroy {
           workflowStatus: persistedReview?.workflowStatus ?? 'pending_review',
           promotionError: persistedReview?.promotionError ?? null,
         });
+      }
+
+      for (const row of lmsReviewRows) {
+        const key = this.getLmsReviewKey(row);
+        const persistedReview = reviewState.reviews[key];
+        this.allReviewItems.push(this.buildLmsReviewItem(row, key, persistedReview));
       }
 
       this.allReviewItems.sort((left, right) =>
@@ -909,6 +925,12 @@ export class QCAssessmentComponent implements OnDestroy {
     return `ML anomaly detection marked this observation as ${StringUtils.formatEnumForDisplay(aiAssessment.outcome)}.`;
   }
 
+  private getSuggestedReviewerActionFromAssessment(aiAssessment: ViewObservationAnomalyAssessmentModel | null): string {
+    return aiAssessment?.generativeExplanation?.suggestedReviewerAction
+      ?? aiAssessment?.externalReviewMetadata?.recommendedAction
+      ?? 'Review the record and capture the final reviewer decision.';
+  }
+
   private getAIConfidence(aiAssessment: ViewObservationAnomalyAssessmentModel | null): number | null {
     if (!aiAssessment) {
       return null;
@@ -967,6 +989,177 @@ export class QCAssessmentComponent implements OnDestroy {
   private async fetchAllAnomalyAssessments(query: ViewObservationQueryModel): Promise<ViewObservationAnomalyAssessmentModel[]> {
     const anomalyQuery = this.getUnifiedAnomalyQueryWindow(query);
     return this.fetchPagedAnomalyAssessments(query, anomalyQuery);
+  }
+
+  private async fetchLmsReviewRows(query: ViewObservationQueryModel): Promise<Record<string, string>[]> {
+    const pageSize = 5000;
+    const maxPages = 100;
+    const rows: Record<string, string>[] = [];
+    const lmsQuery = this.getLmsReviewQuery(query);
+    let offset = 0;
+
+    for (let page = 0; page < maxPages; page++) {
+      const result = await firstValueFrom(this.lmsAiService.qcReview({ ...lmsQuery, limit: pageSize, offset }).pipe(take(1)));
+      rows.push(...result.rows);
+
+      if (result.rows.length === 0 || offset + result.rows.length >= result.total) {
+        return rows;
+      }
+
+      offset += result.rows.length;
+    }
+
+    console.warn('[QC Review Workspace] LMS review row pagination stopped at safety limit', {
+      loadedRows: rows.length,
+      pageSize,
+      maxPages,
+    });
+    return rows;
+  }
+
+  private getLmsReviewQuery(query: ViewObservationQueryModel): LmsAiQuery {
+    const elementCodes = (query.elementIds ?? [])
+      .map(elementId => this.cachedMetadataSearchService.getElement(elementId)?.abbreviation)
+      .filter((elementCode): elementCode is string => !!elementCode);
+
+    const lmsQuery: LmsAiQuery = {
+      stationIds: query.stationIds && query.stationIds.length > 0 ? query.stationIds : undefined,
+      elementCodes: elementCodes.length > 0 ? elementCodes : undefined,
+      dateFrom: query.fromDate,
+      dateTo: query.toDate,
+    };
+
+    if (elementCodes.length === 1) {
+      lmsQuery.elementCode = elementCodes[0];
+    }
+
+    return lmsQuery;
+  }
+
+  private getLmsReviewKey(row: Record<string, string>): string {
+    return ['lms', row['stationId'], row['elementCode'], row['observationDatetime'], row['value']].join('|');
+  }
+
+  private buildLmsReviewItem(
+    row: Record<string, string>,
+    key: string,
+    persistedReview?: PersistedQCReviewDecision,
+  ): QCReviewItem {
+    const confidence = Number(row['confidence'] || 0);
+    const normalizedConfidence = confidence <= 1 ? Math.round(confidence * 100) : Math.round(confidence);
+    const outcome = `${row['outcome'] || row['finalDecision'] || 'suspect'}`.toLowerCase() as any;
+    const severity = `${row['severity'] || 'medium'}`.toLowerCase() as any;
+    const aiAssessment: ViewObservationAnomalyAssessmentModel = {
+      id: 0,
+      stationId: row['stationId'],
+      elementId: 0,
+      level: 0,
+      datetime: row['observationDatetime'],
+      interval: 1440,
+      sourceId: 0,
+      assessmentType: 'backfill',
+      modelId: row['agreeingModels'] || 'LMS Ensemble',
+      modelFamily: 'lms_ai_pipeline',
+      modelVersion: row['pipelineRunId'] || 'lms-historical',
+      anomalyScore: Number(row['anomalyScore'] || 0),
+      confidenceScore: confidence,
+      severity,
+      outcome,
+      reasons: [row['reviewReason'] || row['explanation'] || 'LMS AI review handoff row'],
+      featureSnapshot: { modelAgreementCount: row['modelAgreementCount'], reviewSource: row['reviewSource'] },
+      contributingSignals: [],
+      generativeExplanation: {
+        summary: row['explanation'] || row['reviewReason'] || '',
+        abnormalPatterns: [row['reviewReason'] || row['explanation'] || 'LMS AI anomaly evidence'],
+        failedQcChecks: row['ruleQcTriggered'] === 'true' ? [row['reviewReason'] || 'Rule QC triggered'] : [],
+        suggestedReviewerAction: row['recommendedReviewerAction'] || 'Review LMS source record and nearby daily sequence.',
+        reviewerGuidance: row['reviewReason'] || 'Use LMS source records and nearby values to confirm the observation.',
+      },
+      reviewQueue: {
+        ruleBasedQc: row['ruleQcTriggered'] === 'true' ? 'Failed' : 'Not Run',
+        failedChecks: row['ruleQcTriggered'] === 'true' ? [row['reviewReason']] : [],
+        aiScore: Number(row['anomalyScore'] || 0),
+        aiConfidence: normalizedConfidence,
+        aiExplanation: row['explanation'],
+        finalDecision: row['finalDecision'] || row['outcome'],
+      },
+      rawObservationData: {
+        value: Number(row['value'] || 0),
+        flag: null,
+        qcStatus: row['ruleQcTriggered'] === 'true' ? QCStatusEnum.FAILED : QCStatusEnum.NONE,
+        comment: row['reviewReason'],
+        deleted: false,
+      },
+      ruleBasedQcResults: {
+        status: row['ruleQcTriggered'] === 'true' ? 'Failed' : 'Not Run',
+        failedChecks: row['ruleQcTriggered'] === 'true' ? [row['reviewReason']] : [],
+        qcTestLog: [],
+      },
+      mlAnomalyOutputs: {
+        modelId: row['agreeingModels'] || 'LMS Ensemble',
+        modelFamily: 'lms_ai_pipeline',
+        modelVersion: row['pipelineRunId'] || 'lms-historical',
+        anomalyStatus: outcome,
+        anomalyScore: Number(row['anomalyScore'] || 0),
+        confidenceScore: confidence,
+        severity,
+        contributingSignals: [],
+        featureSnapshot: { modelAgreementCount: row['modelAgreementCount'], reviewSource: row['reviewSource'] },
+      },
+      externalReviewMetadata: {
+        recordId: key,
+        stationId: row['stationId'],
+        observationDatetime: row['observationDatetime'],
+        elementCode: row['elementCode'],
+        value: row['value'],
+        qcStatus: row['ruleQcTriggered'] === 'true' ? 'failed' : 'not_run',
+        mlStatus: outcome,
+        finalDecision: row['finalDecision'] || row['outcome'],
+        severity,
+        anomalyType: row['reviewSource'] || 'lms_ai',
+        explanationSummary: row['explanation'],
+        recommendedAction: row['recommendedReviewerAction'],
+        modelVersion: row['pipelineRunId'] || 'lms-historical',
+        engineVersion: 'lms-ai-pipeline',
+        runTimestamp: row['processedAt'],
+      },
+      createdByUserId: null,
+      createdAt: row['processedAt'] || row['observationDatetime'],
+    };
+
+    return {
+      key,
+      observationEntry: null,
+      stationId: row['stationId'],
+      elementId: 0,
+      level: 0,
+      interval: 1440,
+      sourceId: 0,
+      observationDatetime: row['observationDatetime'],
+      stationName: row['stationName'] || row['stationId'],
+      elementName: row['elementName'] || row['elementCode'],
+      sourceName: 'LMS Historical Daily CSV',
+      formattedDatetime: row['observationDatetime'],
+      intervalName: 'Daily',
+      observationValue: Number(row['value'] || 0),
+      observationFlag: null,
+      observationComment: row['reviewReason'],
+      ruleStatus: row['ruleQcTriggered'] === 'true' ? 'Failed' : 'Not Run',
+      failedChecks: row['ruleQcTriggered'] === 'true' ? [row['reviewReason']] : [],
+      aiAssessment,
+      aiConfidence: normalizedConfidence,
+      aiExplanation: row['explanation'] || row['reviewReason'],
+      reviewSource: row['reviewSource'] || 'lms_ai',
+      reviewReason: row['reviewReason'] || row['explanation'],
+      recommendedReviewerAction: row['recommendedReviewerAction'] || 'Review LMS source record and nearby daily sequence.',
+      reviewerDecision: persistedReview?.decision ?? 'pending',
+      reviewerNotes: persistedReview?.notes ?? '',
+      correctedValue: persistedReview?.correctedValue ?? null,
+      reviewedAt: persistedReview?.reviewedAt ?? null,
+      reviewedByEmail: persistedReview?.reviewedByEmail ?? null,
+      workflowStatus: persistedReview?.workflowStatus ?? 'pending_review',
+      promotionError: persistedReview?.promotionError ?? null,
+    };
   }
 
   private async fetchPagedAnomalyAssessments(

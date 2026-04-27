@@ -26,10 +26,130 @@
       <strong>{{ latestTrainingRunLabel }}</strong>
       <small>{{ latestTrainingRunDate }}</small>
     </div>
+    <div class="summary-card" *ngIf="lmsAiStatus?.available">
+      <span class="summary-label">LMS AI review rows</span>
+      <strong>{{ lmsManifest.qcReviewRows || 0 }}</strong>
+      <small>{{ lmsManifest.runId }}</small>
+    </div>
   </div>
 
-  <div class="panel">
-    <div class="panel-title">Training Selection</div>
+  <div class="panel" *ngIf="lmsAiStatus?.available">
+    <div class="panel-title">LMS Historical AI Pipeline Results</div>
+    <div class="detail-grid">
+      <div class="source-card mini-card"><span class="field-label">Latest run ID</span><strong>{{ lmsManifest.runId }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Input rows</span><strong>{{ formatCount(lmsManifest.totalInputRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Clean rows</span><strong>{{ formatCount(lmsManifest.totalCleanRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Rejected rows</span><strong>{{ formatCount(lmsManifest.totalRejectedRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Prediction rows</span><strong>{{ formatCount(lmsManifest.totalPredictionRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">QC review rows</span><strong>{{ formatCount(lmsManifest.qcReviewRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Warning rows</span><strong>{{ formatCount(lmsManifest.warningRows) }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Autoencoder calibration</span><strong>{{ lmsManifest.autoencoderCalibrationMode || 'Not available' }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">Ensemble anomaly rate</span><strong>{{ formatRate(lmsModelSummary?.anomalyRatePerModel?.Ensemble) }}</strong></div>
+    </div>
+
+    <div class="grid-two mt-3">
+      <div>
+        <div class="panel-title">Per-Model Metrics</div>
+        <div class="table-wrap">
+          <table class="table table-sm table-hover">
+            <thead><tr><th>Model</th><th>Total</th><th>Anomalies</th><th>Rate</th><th>Max score</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let item of lmsModelMetricsEntries">
+                <td>{{ item.name }}</td>
+                <td>{{ item.metrics.totalRows }}</td>
+                <td>{{ item.metrics.anomalyCount }}</td>
+                <td>{{ formatRate(item.metrics.anomalyRate) }}</td>
+                <td>{{ item.metrics.maxAnomalyScore }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div>
+        <div class="panel-title">Generated Reports</div>
+        <div class="source-card" *ngFor="let report of lmsReports">
+          <strong>{{ report.fileName }}</strong>
+          <span>{{ report.label }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-two mt-3">
+      <div class="source-card">
+        <strong>Highest-risk stations</strong>
+        <small *ngFor="let row of lmsTopStations">{{ row.stationId }} · {{ row.anomalyCount }} · {{ formatRate(row.anomalyRate) }}</small>
+      </div>
+      <div class="source-card">
+        <strong>Highest-risk elements</strong>
+        <small *ngFor="let row of lmsTopElements">{{ row.elementCode }} · {{ row.anomalyCount }} · {{ formatRate(row.anomalyRate) }}</small>
+      </div>
+      <div class="source-card">
+        <strong>Top station-element pairs</strong>
+        <small *ngFor="let row of lmsTopPairs">{{ row.stationId }}/{{ row.elementCode }} · {{ row.anomalyCount }} · {{ formatRate(row.anomalyRate) }}</small>
+      </div>
+    </div>
+
+    <div class="panel-subtitle mt-3">LMS Historical Dataset Preview</div>
+    <div class="filter-grid compact-filter-grid">
+      <label class="filter-field">Station ID<input type="text" placeholder="Any station" [(ngModel)]="lmsPreviewStationId"></label>
+      <label class="filter-field">Element code<input type="text" placeholder="rain, tmin, tmax" [(ngModel)]="lmsPreviewElementCode"></label>
+      <label class="filter-field">From<input type="date" [(ngModel)]="lmsPreviewFromDate"></label>
+      <label class="filter-field">To<input type="date" [(ngModel)]="lmsPreviewToDate"></label>
+      <div class="filter-field action-field">
+        <button type="button" class="btn btn-outline-primary btn-sm" (click)="previewLmsDataset()" [disabled]="lmsPreviewLoading">
+          Preview Dataset
+        </button>
+      </div>
+    </div>
+    <div class="table-wrap mt-2">
+      <table class="table table-sm table-hover lms-preview-table">
+        <thead>
+          <tr>
+            <th>stationId</th><th>stationName</th><th>year</th><th>month</th><th>day</th><th>observationDatetime</th>
+            <th>elementCode</th><th>elementName</th><th class="text-end">value</th><th>unit</th><th>source</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let row of lmsPreviewRows">
+            <td>{{ row['stationId'] }}</td>
+            <td>{{ row['stationName'] }}</td>
+            <td>{{ row['year'] }}</td>
+            <td>{{ row['month'] }}</td>
+            <td>{{ row['day'] }}</td>
+            <td>{{ row['observationDatetime'] }}</td>
+            <td>{{ row['elementCode'] }}</td>
+            <td>{{ row['elementName'] }}</td>
+            <td class="text-end">{{ row['value'] }}</td>
+            <td>{{ row['unit'] }}</td>
+            <td>{{ row['sourceDataset'] || row['sourceFile'] }}</td>
+          </tr>
+          <tr *ngIf="!lmsPreviewLoading && lmsPreviewRows.length === 0">
+            <td colspan="11" class="empty">No LMS preview loaded. Choose optional filters and click Preview Dataset.</td>
+          </tr>
+          <tr *ngIf="lmsPreviewLoading">
+            <td colspan="11" class="empty">Loading LMS historical dataset preview...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel-subtitle mt-3">Supervisor Summary</div>
+    <div class="summary-section-grid">
+      <div class="summary-section-card" *ngFor="let section of lmsSupervisorSummarySections">
+        <strong>{{ section.title }}</strong>
+        <ul *ngIf="section.lines.length; else noSummarySection">
+          <li *ngFor="let line of section.lines">{{ line }}</li>
+        </ul>
+        <ng-template #noSummarySection><small>Not available in the current supervisor report.</small></ng-template>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel legacy-panel" [class.legacy-muted]="lmsHasOutputs">
+    <div class="panel-title">Legacy/proxy training controls</div>
+    <p class="legacy-note" *ngIf="lmsHasOutputs">
+      LMS historical outputs are available above. These controls remain for the older proxy training workflow and are not the primary LMS demo evidence.
+    </p>
     <div class="filter-grid">
       <div class="filter-field selector-field">
         <app-station-selector-multiple
@@ -69,7 +189,9 @@
       <label class="filter-field">To<input type="date" [(ngModel)]="toDate"></label>
     </div>
     <div class="actions">
-      <button type="button" class="btn btn-outline-primary" (click)="previewDataset()" [disabled]="loading">Preview Dataset</button>
+      <button type="button" class="btn btn-outline-primary" (click)="previewDataset()" [disabled]="loading">
+        {{ lmsHasOutputs ? 'Preview LMS Dataset' : 'Preview Dataset' }}
+      </button>
       <button type="button" class="btn btn-primary" (click)="runTraining()" [disabled]="loading">Run Training</button>
     </div>
   </div>

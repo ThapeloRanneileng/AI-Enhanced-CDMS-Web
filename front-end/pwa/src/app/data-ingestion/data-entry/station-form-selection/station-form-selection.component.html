@@ -11,6 +11,10 @@
     {{ openingErrorMessage }}
   </div>
 
+  <div class="alert alert-info mb-3">
+    Manual observations continue through the normal Climsoft data-entry workflow. After saving, observations can be reviewed through Quality Control and AI anomaly checks without running heavy AI processing inside the entry form.
+  </div>
+
   <div *ngIf="isLoadingForms" class="forms-grid">
     <div class="form-card form-card-loading" *ngFor="let item of [1, 2, 3]">
       <div class="loading-line loading-line-short"></div>

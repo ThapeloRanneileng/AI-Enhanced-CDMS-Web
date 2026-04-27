@@ -15,6 +15,7 @@ import { ObservationAnomalyJobService } from './services/observation-anomaly-job
 import { ObservationAnomalyAssessmentsQueryService } from './services/observation-anomaly-assessments-query.service';
 import { ObservationAnomalyAssessmentsController } from './controllers/observation-anomaly-assessments.controller';
 import { ObservationAnomalyTrainingController } from './controllers/observation-anomaly-training.controller';
+import { LmsAiController } from './controllers/lms-ai.controller';
 import { UserModule } from 'src/user/user.module';
 import { ObservationGenerativeReviewAssistanceService } from './services/observation-generative-review-assistance.service';
 import { AnomalyTrainingDataPreparationService } from './services/anomaly-training-data-preparation.service';
@@ -23,6 +24,7 @@ import { AnomalyModelTrainingService } from './services/anomaly-model-training.s
 import { AnomalyBaselineModelService } from './services/anomaly-baseline-model.service';
 import { AnomalyModelPersistenceService } from './services/anomaly-model-persistence.service';
 import { AnomalyModelRegistryLoaderService } from './services/anomaly-model-registry-loader.service';
+import { LmsAiOutputService } from './services/lms-ai-output.service';
 
 @Module({
   imports: [
@@ -40,6 +42,7 @@ import { AnomalyModelRegistryLoaderService } from './services/anomaly-model-regi
   controllers: [
     ObservationAnomalyAssessmentsController,
     ObservationAnomalyTrainingController,
+    LmsAiController,
   ],
   providers: [
     AnomalyFeatureBuilderService,
@@ -55,6 +58,7 @@ import { AnomalyModelRegistryLoaderService } from './services/anomaly-model-regi
     ObservationAnomalyAssessmentService,
     ObservationAnomalyJobService,
     ObservationAnomalyAssessmentsQueryService,
+    LmsAiOutputService,
   ],
   exports: [
     AnomalyFeatureBuilderService,
@@ -68,6 +72,7 @@ import { AnomalyModelRegistryLoaderService } from './services/anomaly-model-regi
     ObservationGenerativeReviewAssistanceService,
     ObservationAnomalyAssessmentService,
     ObservationAnomalyAssessmentsQueryService,
+    LmsAiOutputService,
   ]
 })
 export class ObservationAiModule { }

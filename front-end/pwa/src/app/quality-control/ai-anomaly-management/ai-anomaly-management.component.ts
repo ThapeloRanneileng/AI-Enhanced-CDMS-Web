@@ -1,5 +1,5 @@
 import { Component, OnInit } from '@angular/core';
-import { forkJoin, take } from 'rxjs';
+import { catchError, forkJoin, of, take } from 'rxjs';
 import { PagesDataService, ToastEventTypeEnum } from 'src/app/core/services/pages-data.service';
 import { ViewObservationAnomalyAssessmentModel } from '../models/view-observation-anomaly-assessment.model';
 import { ObservationAnomalyAssessmentsService } from '../services/observation-anomaly-assessments.service';
@@ -11,6 +11,12 @@ import {
   AnomalyTrainingRun,
   ObservationAiTrainingService,
 } from '../services/observation-ai-training.service';
+import { LmsAiService, LmsAiStatus } from '../services/lms-ai.service';
+
+interface SupervisorSummarySection {
+  title: string;
+  lines: string[];
+}
 
 @Component({
   selector: 'app-ai-anomaly-management',
@@ -41,11 +47,33 @@ export class AiAnomalyManagementComponent implements OnInit {
   protected latestScoring: ViewObservationAnomalyAssessmentModel | null = null;
   protected latestScoringState: 'idle' | 'loading' | 'ready' | 'empty' | 'error' = 'idle';
   protected latestScoringMessage = 'Select a model to view its latest shared anomaly scoring result.';
+  protected lmsAiStatus: LmsAiStatus | null = null;
+  protected lmsSupervisorSummary = '';
+  protected lmsSupervisorSummarySections: SupervisorSummarySection[] = [];
+  protected lmsReports: { label: string; fileName: string; exists: boolean }[] = [];
+  protected lmsPreviewRows: Record<string, string>[] = [];
+  protected lmsPreviewLoading = false;
+  protected lmsPreviewStationId = '';
+  protected lmsPreviewElementCode = '';
+  protected lmsPreviewFromDate = '';
+  protected lmsPreviewToDate = '';
+  protected readonly supervisorSummarySectionTitles = [
+    'Pipeline Run Overview',
+    'Data Ingestion Summary',
+    'AI Model Summary',
+    'Autoencoder Calibration Summary',
+    'Anomaly Review Summary',
+    'Highest-Risk Stations and Elements',
+    'QC Review Handoff Summary',
+    'Interpretation Notes',
+    'Next Recommended Actions',
+  ];
 
   constructor(
     private pagesDataService: PagesDataService,
     private observationAiTrainingService: ObservationAiTrainingService,
     private observationAnomalyAssessmentsService: ObservationAnomalyAssessmentsService,
+    private lmsAiService: LmsAiService,
   ) {
     this.pagesDataService.setPageHeader('AI Anomaly Management');
   }
@@ -55,6 +83,11 @@ export class AiAnomalyManagementComponent implements OnInit {
   }
 
   protected previewDataset(): void {
+    if (this.lmsAiStatus?.available) {
+      this.previewLmsDataset();
+      return;
+    }
+
     this.loading = true;
     this.observationAiTrainingService.previewDataset({ ...this.buildRequest(), limit: 100 }).pipe(take(1)).subscribe({
       next: rows => this.previewRows = rows,
@@ -84,14 +117,40 @@ export class AiAnomalyManagementComponent implements OnInit {
       proxySources: this.observationAiTrainingService.listProxySources(),
       trainingRuns: this.observationAiTrainingService.listTrainingRuns(),
       models: this.observationAiTrainingService.listModels(),
+      lmsStatus: this.lmsAiService.status().pipe(catchError(() => of(null))),
+      lmsSupervisorSummary: this.lmsAiService.supervisorSummary().pipe(catchError(() => of({ exists: false, content: '', file: null }))),
     }).pipe(take(1)).subscribe({
       next: data => {
         this.proxySources = data.proxySources;
         this.trainingRuns = data.trainingRuns;
         this.models = data.models;
+        this.lmsAiStatus = data.lmsStatus;
+        this.lmsSupervisorSummary = data.lmsSupervisorSummary.content;
+        this.lmsSupervisorSummarySections = this.parseSupervisorSummary(data.lmsSupervisorSummary.content);
+        this.lmsReports = (data.lmsStatus?.files ?? [])
+          .filter(file => file.exists && ['modelSummary', 'modelSummaryMarkdown', 'supervisorSummary', 'manifest', 'qcReview', 'ensemble'].includes(file.key))
+          .map(file => ({ label: file.key, fileName: file.fileName, exists: file.exists }));
         this.syncSelectedModel();
       },
       error: err => this.handleError(err),
+    });
+  }
+
+  protected previewLmsDataset(): void {
+    this.lmsPreviewLoading = true;
+    this.lmsAiService.normalizedObservations({
+      stationId: this.lmsPreviewStationId || undefined,
+      elementCode: this.lmsPreviewElementCode || undefined,
+      dateFrom: this.lmsPreviewFromDate || undefined,
+      dateTo: this.lmsPreviewToDate || undefined,
+      limit: 50,
+    }).pipe(take(1)).subscribe({
+      next: result => this.lmsPreviewRows = result.rows,
+      error: err => {
+        this.lmsPreviewLoading = false;
+        this.handleError(err);
+      },
+      complete: () => this.lmsPreviewLoading = false,
     });
   }
 
@@ -110,6 +169,48 @@ export class AiAnomalyManagementComponent implements OnInit {
 
   protected get latestTrainingRunDate(): string {
     return this.latestTrainingRun?.createdAt ?? 'Run training to create one';
+  }
+
+  protected get lmsManifest(): any {
+    return this.lmsAiStatus?.manifest ?? {};
+  }
+
+  protected get lmsModelSummary(): any {
+    return this.lmsAiStatus?.modelSummary ?? {};
+  }
+
+  protected get lmsModelMetricsEntries(): { name: string; metrics: any }[] {
+    const metrics = this.lmsModelSummary?.modelMetrics ?? {};
+    return Object.keys(metrics).map(name => ({ name, metrics: metrics[name] }));
+  }
+
+  protected get lmsTopStations(): any[] {
+    return [...(this.lmsModelSummary?.stationAnomalyRates ?? [])]
+      .sort((left, right) => Number(right.anomalyRate) - Number(left.anomalyRate))
+      .slice(0, 5);
+  }
+
+  protected get lmsTopElements(): any[] {
+    return [...(this.lmsModelSummary?.elementAnomalyRates ?? [])]
+      .sort((left, right) => Number(right.anomalyRate) - Number(left.anomalyRate))
+      .slice(0, 5);
+  }
+
+  protected get lmsTopPairs(): any[] {
+    return (this.lmsModelSummary?.topStationElementPairs ?? []).slice(0, 5);
+  }
+
+  protected get lmsHasOutputs(): boolean {
+    return !!this.lmsAiStatus?.available;
+  }
+
+  protected formatRate(value: any): string {
+    return `${((Number(value) || 0) * 100).toFixed(2)}%`;
+  }
+
+  protected formatCount(value: any): string {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue.toLocaleString() : '0';
   }
 
   protected isElementSelected(code: string): boolean {
@@ -189,6 +290,31 @@ export class AiAnomalyManagementComponent implements OnInit {
       message: err?.error?.message || err?.message || err,
       type: ToastEventTypeEnum.ERROR,
     });
+  }
+
+  private parseSupervisorSummary(markdown: string): SupervisorSummarySection[] {
+    const normalized = (markdown || '').replace(/\\n/g, '\n');
+    const sections = new Map<string, string[]>();
+    const headingPattern = /^##\s+(.+)$/;
+    let currentTitle = '';
+
+    normalized.split(/\r?\n/).forEach(rawLine => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('# LMS Supervisor Summary')) return;
+      const headingMatch = line.match(headingPattern);
+      if (headingMatch) {
+        currentTitle = headingMatch[1].trim();
+        sections.set(currentTitle, []);
+        return;
+      }
+      if (!currentTitle) return;
+      sections.get(currentTitle)?.push(line.replace(/^-\s*/, ''));
+    });
+
+    return this.supervisorSummarySectionTitles.map(title => ({
+      title,
+      lines: sections.get(title) ?? [],
+    }));
   }
 
   private syncSelectedModel(): void {

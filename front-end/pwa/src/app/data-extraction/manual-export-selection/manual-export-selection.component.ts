@@ -6,6 +6,12 @@ import { AppAuthService } from 'src/app/app-auth.service';
 import { PagesDataService } from 'src/app/core/services/pages-data.service';
 import { ViewExportSpecificationModel } from 'src/app/metadata/export-specifications/models/view-export-specification.model';
 import { ExportSpecificationsService } from 'src/app/metadata/export-specifications/services/export-specifications.service';
+import { LmsAiService, LmsAiStatus } from 'src/app/quality-control/services/lms-ai.service';
+
+interface SupervisorSummarySection {
+  title: string;
+  lines: string[];
+}
 
 @Component({
   selector: 'app-manual-export-selection',
@@ -14,12 +20,27 @@ import { ExportSpecificationsService } from 'src/app/metadata/export-specificati
 })
 export class ManualExportSelectionComponent implements OnDestroy {
   protected exports!: ViewExportSpecificationModel[];
+  protected lmsAiStatus: LmsAiStatus | null = null;
+  protected lmsSupervisorSummary = '';
+  protected lmsSupervisorSummarySections: SupervisorSummarySection[] = [];
+  protected readonly supervisorSummarySectionTitles = [
+    'Pipeline Run Overview',
+    'Data Ingestion Summary',
+    'AI Model Summary',
+    'Autoencoder Calibration Summary',
+    'Anomaly Review Summary',
+    'Highest-Risk Stations and Elements',
+    'QC Review Handoff Summary',
+    'Interpretation Notes',
+    'Next Recommended Actions',
+  ];
   private destroy$ = new Subject<void>();
 
   constructor(
     private pagesDataService: PagesDataService,
     private appAuthService: AppAuthService,
     private exportTemplateService: ExportSpecificationsService,
+    private lmsAiService: LmsAiService,
     private router: Router,
     private route: ActivatedRoute,) {
     this.pagesDataService.setPageHeader('Select Export');
@@ -41,6 +62,7 @@ export class ManualExportSelectionComponent implements OnDestroy {
         throw new Error('User not allowed to export data');
       }
     });
+    this.loadLmsReports();
   }
 
   ngOnDestroy() {
@@ -69,6 +91,46 @@ export class ManualExportSelectionComponent implements OnDestroy {
 
   protected onExportClick(source: ViewExportSpecificationModel): void {
     this.router.navigate(['manual-export-download', source.id], { relativeTo: this.route.parent });
+  }
+
+  protected get lmsManifest(): any {
+    return this.lmsAiStatus?.manifest ?? {};
+  }
+
+  private loadLmsReports(): void {
+    this.lmsAiService.status().pipe(take(1)).subscribe({
+      next: status => this.lmsAiStatus = status,
+      error: () => this.lmsAiStatus = null,
+    });
+    this.lmsAiService.supervisorSummary().pipe(take(1)).subscribe({
+      next: report => {
+        this.lmsSupervisorSummary = report.content;
+        this.lmsSupervisorSummarySections = this.parseSupervisorSummary(report.content);
+      },
+      error: () => this.lmsSupervisorSummary = '',
+    });
+  }
+
+  private parseSupervisorSummary(markdown: string): SupervisorSummarySection[] {
+    const sections = new Map<string, string[]>();
+    let currentTitle = '';
+
+    (markdown || '').replace(/\\n/g, '\n').split(/\r?\n/).forEach(rawLine => {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('# LMS Supervisor Summary')) return;
+      const headingMatch = line.match(/^##\s+(.+)$/);
+      if (headingMatch) {
+        currentTitle = headingMatch[1].trim();
+        sections.set(currentTitle, []);
+        return;
+      }
+      if (currentTitle) sections.get(currentTitle)?.push(line.replace(/^-\s*/, ''));
+    });
+
+    return this.supervisorSummarySectionTitles.map(title => ({
+      title,
+      lines: sections.get(title) ?? [],
+    }));
   }
 
 }

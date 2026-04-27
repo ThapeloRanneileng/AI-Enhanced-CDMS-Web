@@ -12,7 +12,31 @@
     </div>
   </div>
 
-<div class="manual-import">
+  <div class="manual-import">
+  <div *ngIf="hasLmsAiEvidence" class="panel mb-3">
+    <div class="panel-heading">
+      <span>LMS Historical Ingestion Evidence</span>
+      <span class="small text-muted">Pipeline run {{ lmsManifest.runId || 'not available' }}</span>
+    </div>
+    <div class="row g-2">
+      <div class="col-md-3">
+        <div class="result-stat"><div class="small text-muted">Input rows</div><div class="fs-5 fw-semibold">{{ formatNumber(lmsManifest.totalInputRows) }}</div></div>
+      </div>
+      <div class="col-md-3">
+        <div class="result-stat imported"><div class="small text-muted">Clean rows</div><div class="fs-5 fw-semibold">{{ formatNumber(lmsManifest.totalCleanRows) }}</div></div>
+      </div>
+      <div class="col-md-3">
+        <div class="result-stat rejected"><div class="small text-muted">Rejected records</div><div class="fs-5 fw-semibold">{{ formatNumber(lmsManifest.totalRejectedRows) }}</div></div>
+      </div>
+      <div class="col-md-3">
+        <div class="result-stat"><div class="small text-muted">QC review rows</div><div class="fs-5 fw-semibold">{{ formatNumber(lmsManifest.qcReviewRows) }}</div></div>
+      </div>
+    </div>
+    <div class="small text-muted mt-2">
+      LMS historical data ingestion is tracked as part of the wider CDMS workflow. Rejected records are available through AI Anomaly Management and reports.
+    </div>
+  </div>
+
   <div class="mb-3">
     <div class="row g-2">
       <div class="col-md-6 col-xl-4" *ngFor="let option of importOptions">

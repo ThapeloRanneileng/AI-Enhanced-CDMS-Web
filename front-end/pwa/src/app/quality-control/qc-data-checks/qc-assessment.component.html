@@ -108,6 +108,7 @@
                                         <th>AI Score</th>
                                         <th>AI Confidence</th>
                                         <th>AI Explanation</th>
+                                        <th>Review Source</th>
                                         <th>Final Decision</th>
                                     </tr>
                                 </thead>
@@ -143,13 +144,17 @@
                                             {{ item.aiExplanation }}
                                         </td>
                                         <td>
+                                            <div class="small fw-semibold">{{ item.reviewSource }}</div>
+                                            <div class="small text-muted">{{ item.reviewReason }}</div>
+                                        </td>
+                                        <td>
                                             <span [class]="getDecisionClass(item.reviewerDecision)">
                                                 {{ formatDecision(item.reviewerDecision) }}
                                             </span>
                                         </td>
                                     </tr>
                                     <tr *ngIf="filteredReviewItems.length === 0">
-                                        <td colspan="8" class="py-4">
+                                        <td colspan="9" class="py-4">
                                             <div class="qc-empty-state">
                                                 <div class="qc-empty-icon">Q</div>
                                                 <div class="fw-semibold">No QC review records found for the selected filters.</div>
@@ -263,6 +268,9 @@
                             <ul class="detail-compact-list mt-2">
                                 <li *ngFor="let bullet of getWhyFlaggedBullets(item)">{{ bullet }}</li>
                             </ul>
+                            <div class="small text-muted mt-2" *ngIf="item.reviewReason">
+                                Review reason: {{ item.reviewReason }}
+                            </div>
                         </div>
 
                         <div class="mb-3">
@@ -290,7 +298,7 @@
                         <div class="mb-3">
                             <div class="small text-muted text-uppercase fw-semibold">Suggested Reviewer Action</div>
                             <div class="small mt-2">
-                                {{ getCompactReviewerAction(item) }}
+                                {{ item.recommendedReviewerAction || getCompactReviewerAction(item) }}
                             </div>
                         </div>
 

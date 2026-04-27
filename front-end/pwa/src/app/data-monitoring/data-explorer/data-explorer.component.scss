@@ -8,6 +8,9 @@
 .metric-value{color:#1f2933;display:block;font-size:1.45rem;font-weight:700;line-height:1}
 .metric-label,.results-subtitle,.secondary-cell,.row-number{font-size:.82rem}
 .filter-panel,.results-panel{padding:1rem}
+.mode-switch{align-items:center;background:#fff;border:1px solid #e1e7e4;border-radius:8px;display:inline-flex;gap:.25rem;padding:.25rem;width:max-content}
+.mode-switch button{background:transparent;border:0;border-radius:6px;color:#4b5563;font-size:.84rem;font-weight:700;padding:.5rem .8rem}
+.mode-switch button.active{background:#e7f1ec;color:#1f5c3e}
 .results-toolbar{align-items:center;border-bottom:1px solid #edf1ef;display:flex;gap:1rem;justify-content:space-between;padding-bottom:.75rem}
 .results-title,.primary-cell{color:#1f2933;font-weight:700}
 .table-wrap{overflow:auto}
@@ -21,3 +24,5 @@
 .status-none{background:#eef2f6;color:#4b5563}
 .state-panel{background:#f8fafc;border:1px dashed #d6dee6;border-radius:8px;margin-top:.9rem;min-height:8rem;padding:3rem 1rem;text-align:center}
 .group-row-border{border-bottom:2px solid #b9c7bf}
+.lms-filter-row{margin-top:.9rem}
+.pagination-strip{display:flex;gap:.5rem;justify-content:flex-end;margin-top:.85rem}

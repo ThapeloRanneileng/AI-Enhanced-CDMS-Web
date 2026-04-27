@@ -1,0 +1,223 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { LmsAiOutputService } from './lms-ai-output.service';
+
+describe('LmsAiOutputService', () => {
+  let service: LmsAiOutputService;
+  let tempDir: string;
+  let outputDir: string;
+  let rejectedDir: string;
+
+  beforeEach(() => {
+    service = new LmsAiOutputService();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lms-ai-output-service-'));
+    outputDir = path.join(tempDir, 'outputs');
+    rejectedDir = path.join(tempDir, 'rejected');
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.mkdirSync(rejectedDir, { recursive: true });
+
+    jest.spyOn(service as any, 'getOutputDir').mockReturnValue(outputDir);
+    jest.spyOn(service as any, 'getRejectedDir').mockReturnValue(rejectedDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    jest.restoreAllMocks();
+  });
+
+  it('returns safe empty and missing responses when LMS output files do not exist', () => {
+    const normalized = service.getNormalizedObservations({ limit: 25, offset: 5 });
+    const rejected = service.getRejectedRecords({});
+    const status = service.getStatus();
+    const supervisorSummary = service.getSupervisorSummary();
+
+    expect(normalized).toMatchObject({
+      total: 0,
+      limit: 25,
+      offset: 5,
+      rows: [],
+      missing: true,
+    });
+    expect(normalized.file).toMatchObject({
+      key: 'normalized',
+      fileName: 'lms_all_station_training_input_normalized.csv',
+      exists: false,
+      sizeBytes: 0,
+    });
+    expect(rejected).toMatchObject({ total: 0, rows: [], missing: true });
+    expect(status).toMatchObject({
+      available: false,
+      manifest: null,
+      modelSummary: null,
+      autoencoderStatus: null,
+    });
+    expect(supervisorSummary).toMatchObject({
+      exists: false,
+      content: '',
+    });
+  });
+
+  it('parses CSV rows, including quoted commas, into keyed row objects', () => {
+    writeOutputCsv(
+      'lms_ensemble_anomaly_predictions.csv',
+      [
+        'stationId,stationName,observationDatetime,elementCode,elementName,value,outcome,explanation',
+        'LES001,"Maseru, Airport",1967-01-01,rain,Rainfall,12.5,NORMAL,"quoted, explanation"',
+      ],
+    );
+
+    const result = service.getEnsemble({});
+
+    expect(result.missing).toBe(false);
+    expect(result.total).toBe(1);
+    expect(result.rows[0]).toMatchObject({
+      stationId: 'LES001',
+      stationName: 'Maseru, Airport',
+      observationDatetime: '1967-01-01',
+      elementCode: 'rain',
+      elementName: 'Rainfall',
+      value: '12.5',
+      outcome: 'NORMAL',
+      explanation: 'quoted, explanation',
+    });
+  });
+
+  it('filters rows by historical date ranges using observationDatetime', () => {
+    writeOutputCsv(
+      'lms_ensemble_anomaly_predictions.csv',
+      [
+        'stationId,observationDatetime,elementCode,value,outcome',
+        'LES001,1966-12-31,rain,1,NORMAL',
+        'LES001,1967-01-01,rain,2,NORMAL',
+        'LES001,2019-12-31T23:59:59.000Z,rain,3,SUSPECT',
+        'LES001,2020-01-01,rain,4,FAILED',
+      ],
+    );
+
+    const result = service.getEnsemble({
+      dateFrom: '1967-01-01',
+      dateTo: '2019-12-31',
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.rows.map(row => row.value)).toEqual(['2', '3']);
+  });
+
+  it('adds derived year, month, and day fields from observationDatetime', () => {
+    writeOutputCsv(
+      'lms_all_station_training_input_normalized.csv',
+      [
+        'stationId,stationName,observationDatetime,elementCode,elementName,value,unit',
+        'LES001,Maseru,1993-07-05T12:30:00.000Z,tmin,Minimum temperature,4.1,C',
+      ],
+    );
+
+    const result = service.getNormalizedObservations({});
+
+    expect(result.rows[0]).toMatchObject({
+      observationDatetime: '1993-07-05T12:30:00.000Z',
+      year: '1993',
+      month: '7',
+      day: '5',
+    });
+  });
+
+  it('filters LMS rows to authorised stationIds supplied by the authorization pipe', () => {
+    writeOutputCsv(
+      'lms_qc_review_handoff.csv',
+      [
+        'stationId,observationDatetime,elementCode,value,outcome',
+        'LES001,2011-01-01,rain,1,NORMAL',
+        'LES002,2011-01-02,rain,2,SUSPECT',
+        'LES003,2011-01-03,rain,3,FAILED',
+      ],
+    );
+
+    const result = service.getQcReview({ stationIds: ['LES001', 'LES003'] });
+
+    expect(result.total).toBe(2);
+    expect(result.rows.map(row => row.stationId)).toEqual(['LES001', 'LES003']);
+  });
+
+  it('applies an explicit stationId filter within authorised stationIds', () => {
+    writeOutputCsv(
+      'lms_qc_review_handoff.csv',
+      [
+        'stationId,observationDatetime,elementCode,value,outcome',
+        'LES001,2011-01-01,rain,1,NORMAL',
+        'LES002,2011-01-02,rain,2,SUSPECT',
+      ],
+    );
+
+    const allowedAndMatched = service.getQcReview({
+      stationIds: ['LES001', 'LES002'],
+      stationId: 'LES002',
+    });
+    const notAuthorised = service.getQcReview({
+      stationIds: ['LES001'],
+      stationId: 'LES002',
+    });
+
+    expect(allowedAndMatched.total).toBe(1);
+    expect(allowedAndMatched.rows[0].stationId).toBe('LES002');
+    expect(notAuthorised.total).toBe(0);
+    expect(notAuthorised.rows).toEqual([]);
+  });
+
+  it('returns total, normalized limit, offset, and sliced rows for pagination', () => {
+    writeOutputCsv(
+      'lms_ensemble_anomaly_predictions.csv',
+      [
+        'stationId,observationDatetime,elementCode,value,outcome',
+        'LES001,2011-01-01,rain,1,NORMAL',
+        'LES001,2011-01-02,rain,2,NORMAL',
+        'LES001,2011-01-03,rain,3,NORMAL',
+      ],
+    );
+
+    const result = service.getEnsemble({ limit: 1, offset: 1 });
+
+    expect(result).toMatchObject({
+      total: 3,
+      limit: 1,
+      offset: 1,
+    });
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0].value).toBe('2');
+  });
+
+  it.each([
+    ['zscore', 'lms_zscore_predictions.csv', 'Z-score'],
+    ['isolation forest', 'lms_isolation_forest_predictions.csv', 'Isolation Forest'],
+    ['one-class svm', 'lms_one_class_svm_predictions.csv', 'One-Class SVM'],
+    ['autoencoder', 'lms_autoencoder_predictions.csv', 'Autoencoder'],
+  ])('filters prediction rows by modelName=%s', (queryModelName, fileName, rowModelName) => {
+    writePredictionCsv('lms_zscore_predictions.csv', 'Z-score', '1');
+    writePredictionCsv('lms_isolation_forest_predictions.csv', 'Isolation Forest', '2');
+    writePredictionCsv('lms_one_class_svm_predictions.csv', 'One-Class SVM', '3');
+    writePredictionCsv('lms_autoencoder_predictions.csv', 'Autoencoder', '4');
+
+    const result = service.getPredictions({ modelName: queryModelName });
+
+    expect(result.total).toBe(1);
+    expect(result.rows[0]).toMatchObject({
+      modelName: rowModelName,
+      value: fileName.includes('zscore') ? '1' : fileName.includes('isolation') ? '2' : fileName.includes('svm') ? '3' : '4',
+    });
+  });
+
+  function writeOutputCsv(fileName: string, lines: string[]): void {
+    fs.writeFileSync(path.join(outputDir, fileName), `${lines.join('\n')}\n`, 'utf8');
+  }
+
+  function writePredictionCsv(fileName: string, modelName: string, value: string): void {
+    writeOutputCsv(
+      fileName,
+      [
+        'stationId,observationDatetime,elementCode,value,modelName,outcome',
+        `LES001,2011-01-01,rain,${value},${modelName},NORMAL`,
+      ],
+    );
+  }
+});

@@ -37,6 +37,27 @@
         </article>
     </section>
 
+    <section class="panel mb-3" *ngIf="lmsAiStatus?.available">
+        <div class="panel-heading">
+            <div>
+                <span class="eyebrow">LMS Historical AI Pipeline</span>
+                <h2>Pipeline Evidence</h2>
+            </div>
+            <a routerLink="/quality-control/ai-anomaly-management" class="panel-link">Open AI results</a>
+        </div>
+        <div class="row g-2">
+            <div class="col-md-4"><div class="weather-card"><div><div class="weather-label">Latest run</div><div class="weather-detail">{{ lmsManifest.runId || 'Not available' }}</div></div></div></div>
+            <div class="col-md-2"><div class="weather-card"><div><div class="weather-label">Input rows</div><div class="weather-value">{{ formatNumber(lmsManifest.totalInputRows || 0) }}</div></div></div></div>
+            <div class="col-md-2"><div class="weather-card"><div><div class="weather-label">Clean rows</div><div class="weather-value">{{ formatNumber(lmsManifest.totalCleanRows || 0) }}</div></div></div></div>
+            <div class="col-md-2"><div class="weather-card"><div><div class="weather-label">Rejected</div><div class="weather-value">{{ formatNumber(lmsManifest.totalRejectedRows || 0) }}</div></div></div></div>
+            <div class="col-md-2"><div class="weather-card"><div><div class="weather-label">QC review</div><div class="weather-value">{{ formatNumber(lmsManifest.qcReviewRows || 0) }}</div></div></div></div>
+            <div class="col-md-4"><div class="weather-card"><div><div class="weather-label">Prediction rows</div><div class="weather-value">{{ formatNumber(lmsManifest.totalPredictionRows || 0) }}</div></div></div></div>
+            <div class="col-md-4"><div class="weather-card"><div><div class="weather-label">Calibration</div><div class="weather-detail">{{ lmsManifest.autoencoderCalibrationMode || 'Not available' }}</div></div></div></div>
+            <div class="col-md-2"><div class="weather-card"><div><div class="weather-label">Warnings</div><div class="weather-value">{{ formatNumber(lmsManifest.warningRows || 0) }}</div></div></div></div>
+            <div class="col-md-2"><div class="weather-card"><div><div class="weather-label">Anomaly rate</div><div class="weather-value">{{ ensembleAnomalyRate }}</div></div></div></div>
+        </div>
+    </section>
+
     <section class="dashboard-grid">
         <article class="panel climate-panel">
             <div class="panel-heading">

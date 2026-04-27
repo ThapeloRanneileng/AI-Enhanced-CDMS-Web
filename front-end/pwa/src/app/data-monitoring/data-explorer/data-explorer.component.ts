@@ -12,6 +12,7 @@ import { CachedMetadataService } from 'src/app/metadata/metadata-updates/cached-
 import { ObservationEntry } from 'src/app/observations/models/observation-entry.model';
 import { ViewObservationModel } from 'src/app/data-ingestion/models/view-observation.model';
 import { QCStatusEnum } from 'src/app/data-ingestion/models/qc-status.enum';
+import { LmsAiService } from 'src/app/quality-control/services/lms-ai.service';
 
 
 @Component({
@@ -28,6 +29,25 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
   protected allBoundariesIndices: number[] = [];
   protected hasQueried: boolean = false;
   protected isLoading: boolean = false;
+  protected activeMode: 'observations' | 'lms-ai' = 'observations';
+  protected lmsRows: Record<string, string>[] = [];
+  protected lmsTotal = 0;
+  protected lmsQuery = {
+    stationId: '',
+    stationName: '',
+    elementCode: '',
+    elementName: '',
+    dateFrom: '',
+    dateTo: '',
+    outcome: '',
+    finalDecision: '',
+    severity: '',
+    modelName: '',
+    reviewSource: '',
+    limit: 100,
+    offset: 0,
+  };
+  protected lmsLoading = false;
   private utcOffset!: number;
   private allMetadataLoaded: boolean = false;
 
@@ -36,6 +56,7 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
   constructor(
     private pagesDataService: PagesDataService,
     private observationService: ObservationsService,
+    private lmsAiService: LmsAiService,
     private cachedMetadataSearchService: CachedMetadataService,
     private route: ActivatedRoute,
   ) {
@@ -223,5 +244,74 @@ export class DataExplorerComponent implements OnInit, OnDestroy {
       default:
         return 'status-none';
     }
+  }
+
+  protected queryLmsAiOutputs(): void {
+    this.lmsLoading = true;
+    this.lmsAiService.ensemble({
+      stationId: this.lmsQuery.stationId || undefined,
+      stationName: this.lmsQuery.stationName || undefined,
+      elementCode: this.lmsQuery.elementCode || undefined,
+      elementName: this.lmsQuery.elementName || undefined,
+      dateFrom: this.lmsQuery.dateFrom || undefined,
+      dateTo: this.lmsQuery.dateTo || undefined,
+      outcome: this.lmsQuery.outcome || undefined,
+      finalDecision: this.lmsQuery.finalDecision || undefined,
+      severity: this.lmsQuery.severity || undefined,
+      modelName: this.lmsQuery.modelName || undefined,
+      reviewSource: this.lmsQuery.reviewSource || undefined,
+      limit: this.lmsQuery.limit,
+      offset: this.lmsQuery.offset,
+    }).pipe(take(1)).subscribe({
+      next: result => {
+        this.lmsRows = result.rows;
+        this.lmsTotal = result.total;
+      },
+      error: err => {
+        this.lmsLoading = false;
+        this.pagesDataService.showToast({ title: 'LMS AI Query', message: err, type: ToastEventTypeEnum.ERROR });
+      },
+      complete: () => this.lmsLoading = false,
+    });
+  }
+
+  protected onModeChange(mode: 'observations' | 'lms-ai'): void {
+    this.activeMode = mode;
+  }
+
+  protected searchLmsAiOutputs(): void {
+    this.lmsQuery.offset = 0;
+    this.queryLmsAiOutputs();
+  }
+
+  protected nextLmsPage(): void {
+    if (this.lmsQuery.offset + this.lmsQuery.limit >= this.lmsTotal) return;
+    this.lmsQuery.offset += this.lmsQuery.limit;
+    this.queryLmsAiOutputs();
+  }
+
+  protected previousLmsPage(): void {
+    this.lmsQuery.offset = Math.max(0, this.lmsQuery.offset - this.lmsQuery.limit);
+    this.queryLmsAiOutputs();
+  }
+
+  protected get lmsPageStart(): number {
+    return this.lmsTotal === 0 ? 0 : this.lmsQuery.offset + 1;
+  }
+
+  protected get lmsPageEnd(): number {
+    return Math.min(this.lmsTotal, this.lmsQuery.offset + this.lmsRows.length);
+  }
+
+  protected getLmsDecision(row: Record<string, string>): string {
+    return row['finalDecision'] || row['outcome'] || '';
+  }
+
+  protected getLmsStationLabel(row: Record<string, string>): string {
+    return row['stationName'] || row['stationId'] || '';
+  }
+
+  protected getLmsElementLabel(row: Record<string, string>): string {
+    return row['elementName'] || row['elementCode'] || '';
   }
 }

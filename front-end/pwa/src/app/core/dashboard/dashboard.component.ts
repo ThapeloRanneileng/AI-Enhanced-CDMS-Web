@@ -10,6 +10,7 @@ import { SourceTypeEnum } from 'src/app/metadata/source-specifications/models/so
 import { ViewObservationModel } from 'src/app/data-ingestion/models/view-observation.model';
 import { DateUtils } from 'src/app/shared/utils/date.utils';
 import { APP_BRANDING } from '../app-branding';
+import { LmsAiService, LmsAiStatus } from 'src/app/quality-control/services/lms-ai.service';
 
 interface DashboardKpi {
   label: string;
@@ -75,6 +76,7 @@ export class DashboardComponent implements OnDestroy {
   protected activities: ActivityItem[] = [];
   protected quickActions: QuickAction[] = [];
   protected loadingMetrics = true;
+  protected lmsAiStatus: LmsAiStatus | null = null;
 
   private destroy$ = new Subject<void>();
 
@@ -82,7 +84,8 @@ export class DashboardComponent implements OnDestroy {
     private pagesDataService: PagesDataService,
     private appAuthService: AppAuthService,
     private cachedMetadataSearchService: CachedMetadataService,
-    private observationsService: ObservationsService,) {
+    private observationsService: ObservationsService,
+    private lmsAiService: LmsAiService,) {
     this.pagesDataService.setPageHeader('Dashboard');
     this.setDashboardPlaceholders();
 
@@ -103,6 +106,7 @@ export class DashboardComponent implements OnDestroy {
     ).subscribe(allMetadataLoaded => {
       if (allMetadataLoaded) {
         this.refreshDashboardMetrics();
+        this.refreshLmsAiStatus();
       }
     });
   }
@@ -198,7 +202,30 @@ export class DashboardComponent implements OnDestroy {
     });
   }
 
-  private formatNumber(value: number): string {
+  private refreshLmsAiStatus(): void {
+    this.lmsAiService.status().pipe(
+      take(1),
+      takeUntil(this.destroy$),
+      catchError(() => of(null)),
+    ).subscribe(status => {
+      this.lmsAiStatus = status;
+    });
+  }
+
+  protected get lmsManifest(): any {
+    return this.lmsAiStatus?.manifest ?? {};
+  }
+
+  protected get lmsModelSummary(): any {
+    return this.lmsAiStatus?.modelSummary ?? {};
+  }
+
+  protected get ensembleAnomalyRate(): string {
+    const rate = this.lmsModelSummary?.anomalyRatePerModel?.Ensemble ?? 0;
+    return `${((Number(rate) || 0) * 100).toFixed(2)}%`;
+  }
+
+  protected formatNumber(value: number): string {
     return new Intl.NumberFormat().format(value);
   }
 

@@ -4,6 +4,7 @@ import { AppConfigService } from 'src/app/app-config.service';
 import { PagesDataService, ToastEventTypeEnum } from 'src/app/core/services/pages-data.service';
 import { StationsCacheService } from 'src/app/metadata/stations/services/stations-cache.service';
 import { LocalStorageService } from 'src/app/shared/services/local-storage.service';
+import { LmsAiService, LmsAiStatus } from 'src/app/quality-control/services/lms-ai.service';
 import {
   AwsImportRowModel,
   AwsImportSpecModel,
@@ -148,6 +149,7 @@ export class ImportSelectionComponent {
   protected awsMappingSpecName = '';
   protected savedAwsSpecs: SavedAwsSpecOption[] = [];
   protected selectedAwsSpecKey = '';
+  protected lmsAiStatus: LmsAiStatus | null = null;
 
   private readonly stationImportUrl: string;
   private readonly observationImportUrl: string;
@@ -161,11 +163,32 @@ export class ImportSelectionComponent {
     private http: HttpClient,
     private stationsCacheService: StationsCacheService,
     private localStorageService: LocalStorageService,
+    private lmsAiService: LmsAiService,
   ) {
     this.pagesDataService.setPageHeader('Manual Import');
     this.stationImportUrl = `${this.appConfigService.apiBaseUrl}/stations/manual-import`;
     this.observationImportUrl = `${this.appConfigService.apiBaseUrl}/observations/manual-import`;
     this.refreshSavedAwsSpecs();
+    this.loadLmsAiEvidence();
+  }
+
+  protected get lmsManifest(): any {
+    return this.lmsAiStatus?.manifest ?? {};
+  }
+
+  protected get hasLmsAiEvidence(): boolean {
+    return !!this.lmsAiStatus?.available;
+  }
+
+  protected formatNumber(value: number): string {
+    return new Intl.NumberFormat().format(value || 0);
+  }
+
+  private loadLmsAiEvidence(): void {
+    this.lmsAiService.status().subscribe({
+      next: status => this.lmsAiStatus = status,
+      error: () => this.lmsAiStatus = null,
+    });
   }
 
   protected selectOption(option: ManualImportOption): void {

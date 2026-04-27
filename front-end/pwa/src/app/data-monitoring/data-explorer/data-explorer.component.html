@@ -17,7 +17,16 @@
             [advancedToggleLabel]="'More Filters'" [displayFilterHeader]="false" (queryClick)="onQueryClick($event)" />
     </div>
 
-    <div class="results-panel">
+    <div class="mode-switch" role="tablist" aria-label="Data explorer mode">
+        <button type="button" [class.active]="activeMode === 'observations'" (click)="onModeChange('observations')">
+            Observation Records
+        </button>
+        <button type="button" [class.active]="activeMode === 'lms-ai'" (click)="onModeChange('lms-ai')">
+            LMS AI Outputs
+        </button>
+    </div>
+
+    <div class="results-panel" *ngIf="activeMode === 'observations'">
         <div class="results-toolbar">
             <div>
                 <div class="results-title">Observation Results</div>
@@ -81,6 +90,84 @@
                     </tr>
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <div class="results-panel" *ngIf="activeMode === 'lms-ai'">
+        <div class="results-toolbar">
+            <div>
+                <div class="results-title">LMS AI Outputs</div>
+                <div class="results-subtitle">Filter historical LMS anomaly outputs by station, element, date range, decision, severity, model, or review source.</div>
+            </div>
+            <div class="header-metric">
+                <span class="metric-value">{{ lmsTotal }}</span>
+                <span class="metric-label">LMS rows</span>
+            </div>
+        </div>
+        <div class="row g-2 mb-3 lms-filter-row">
+            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="Station ID" [(ngModel)]="lmsQuery.stationId"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="Station name" [(ngModel)]="lmsQuery.stationName"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="Element code" [(ngModel)]="lmsQuery.elementCode"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="Element name" [(ngModel)]="lmsQuery.elementName"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" type="date" [(ngModel)]="lmsQuery.dateFrom"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" type="date" [(ngModel)]="lmsQuery.dateTo"></div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" [(ngModel)]="lmsQuery.outcome">
+                    <option value="">Any outcome</option>
+                    <option value="NORMAL">Normal</option>
+                    <option value="SUSPECT">Suspect</option>
+                    <option value="FAILED">Failed</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" [(ngModel)]="lmsQuery.finalDecision">
+                    <option value="">Any final decision</option>
+                    <option value="NORMAL">Normal</option>
+                    <option value="SUSPECT">Suspect</option>
+                    <option value="FAILED">Failed</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" [(ngModel)]="lmsQuery.severity">
+                    <option value="">Any severity</option>
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                </select>
+            </div>
+            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="Model" [(ngModel)]="lmsQuery.modelName"></div>
+            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="Review source" [(ngModel)]="lmsQuery.reviewSource"></div>
+            <div class="col-md-1"><input class="form-control form-control-sm" type="number" min="1" max="5000" [(ngModel)]="lmsQuery.limit"></div>
+            <div class="col-md-1"><button class="btn btn-sm btn-primary w-100" type="button" (click)="searchLmsAiOutputs()" [disabled]="lmsLoading">Search</button></div>
+        </div>
+        <div class="results-subtitle" *ngIf="lmsTotal">
+            Showing {{ lmsPageStart }}-{{ lmsPageEnd }} of {{ lmsTotal }} LMS AI rows.
+        </div>
+        <div *ngIf="lmsLoading" class="state-panel">Loading LMS AI outputs...</div>
+        <div *ngIf="!lmsLoading && !lmsRows.length" class="state-panel">No LMS AI outputs loaded for the selected filters.</div>
+        <div *ngIf="!lmsLoading && lmsRows.length" class="table-wrap">
+            <table class="table table-hover align-middle observation-table">
+                <thead>
+                    <tr><th>Date</th><th>Station</th><th>Element</th><th class="text-end">Value</th><th>Decision</th><th>Severity</th><th>Score</th><th>Agreement</th><th>Explanation</th></tr>
+                </thead>
+                <tbody>
+                    <tr *ngFor="let row of lmsRows">
+                        <td>{{ row['observationDatetime'] }}</td>
+                        <td><div class="primary-cell">{{ getLmsStationLabel(row) }}</div><div class="secondary-cell">{{ row['stationId'] }}</div></td>
+                        <td><div class="primary-cell">{{ getLmsElementLabel(row) }}</div><div class="secondary-cell">{{ row['elementCode'] }}</div></td>
+                        <td class="text-end value-cell">{{ row['value'] }}</td>
+                        <td>{{ getLmsDecision(row) }}</td>
+                        <td>{{ row['severity'] }}</td>
+                        <td>{{ row['anomalyScore'] }}</td>
+                        <td>{{ row['modelAgreementCount'] || row['agreeingModels'] }}</td>
+                        <td>{{ row['explanation'] }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination-strip" *ngIf="lmsTotal">
+            <button type="button" class="btn btn-outline-secondary btn-sm" (click)="previousLmsPage()" [disabled]="lmsLoading || lmsQuery.offset === 0">Previous</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" (click)="nextLmsPage()" [disabled]="lmsLoading || lmsQuery.offset + lmsQuery.limit >= lmsTotal">Next</button>
         </div>
     </div>
 </section>
