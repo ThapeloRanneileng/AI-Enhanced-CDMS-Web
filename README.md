@@ -2,7 +2,7 @@ python3 << 'PYEOF'
 content = '''# AI-Enhanced Climate Data Management System for Lesotho
 
 > **B.Eng Computer Systems and Networks — Final Year Project**  
-> National University of Lesotho, Department of Physics & Electronics  
+> > National University of Lesotho, Department of Mathematics and Computer Science  
 > **Authors:** Thapelo Ranneileng | Motlatsi Masilo  
 > **Target Organisation:** Lesotho Meteorological Service  
 > **Base System:** Extended from Climsoft Web (open-source CDMS)
