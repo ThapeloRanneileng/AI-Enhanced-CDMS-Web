@@ -1,80 +1,126 @@
-## 🌦️ Climsoft Web – Climate & Hydrology Data Management Platform
+python3 << 'PYEOF'
+content = '''# AI-Enhanced Climate Data Management System for Lesotho
 
-**Climsoft Web** is an open-source, next-generation **Climate & Hydrology Data Management Platform** that builds on the long-standing legacy of [Climsoft Version 4](https://github.com/climsoft) — widely used across Africa and other regions to manage observational climate data.
-It re-imagines Climsoft for the web era, offering a modern, scalable, and collaborative environment for **collecting, processing, validating, storing, and sharing** climate and hydrological data. 
-
----
-
-### 🌍 Purpose
-Climsoft Web is designed to provide an integrated environment for National Meteorological and Hydrological Services (NMHSs), Regional Climate Centres (RCCs), Research Institutions, and development partners to manage observational data from diverse sources — including manual stations, automatic weather stations, and remote sensing systems — within a unified architecture to efficently ensure that environmental observations are **quality-controlled, well-structured, and readily accessible** to support **climate application services**.
-
----
-
-### 🧩 Key Features
-
-* **Data Ingestion & Integration:**
-  Ingest data from web forms, CSV files, legacy databases, FTP/HTTP feeds, or automatic weather stations.
-
-* **Quality Control Framework:**
-  Implements modular QC tests — including range threshold, spike, flat-line, and consistency checks — with configurable parameters and automatic flagging.
-
-* **Database Management:**
-  Powered by **PostgreSQL** for primary storage and **DuckDB** for analytics acceleration; designed for long-term, high-volume time-series data.
-
-* **User & Role Management:**
-  Fine-grained access control for observers, validators, analysts, and administrators, aligned with institutional workflows.
-
-* **Offline-First Web Interface:**
-  Developed in **Angular (PWA)**, enabling data entry and validation even without internet access, with background synchronization when online.
-
-* **API & Integration Layer:**
-  Developed in **NestJS** and based on REST. It includes implementations of HTTP, FTP, MQTT and gRPC for connecting to external systems such as WIS2Box.
-
-* **Analytics & Visualization:**
-  Interactive dashboards, statistical summaries, and geospatial visualizations (Leaflet/ECharts) for station networks, QC results, and environmental indicators.
+> **B.Eng Computer Systems and Networks — Final Year Project**  
+> National University of Lesotho, Department of Physics & Electronics  
+> **Authors:** Thapelo Ranneileng | Motlatsi Masilo  
+> **Target Organisation:** Lesotho Meteorological Service  
+> **Base System:** Extended from Climsoft Web (open-source CDMS)
 
 ---
 
-### 🏗️ Technical Architecture
+## What We Built
 
-| Layer              | Technology           | Purpose                                                |
-| ------------------ | -------------------- | ------------------------------------------------------ |
-| **Frontend**       | Angular PWA          | User-friendly data entry, QC review, and visualization |
-| **Backend**        | NestJS (Node.js) + DuckDB + Python      | Core API and ETL services       |
-| **Database**       | PostgreSQL  | Storage, processing and data extraction queries             |
-| **Deployment**     | Docker Compose       | Reproducible and portable setup             |
-| **Offline Database** | Dexie.js / IndexedDB | Local caching and synchronization for PWA              |
+This repository contains a **complete AI-enhanced extension** of Climsoft Web.  
+We did not simply install Climsoft — we engineered the following systems on top of it.
 
 ---
 
-### 🧠 Evolution from Climsoft Version 4
+## 1. LMS AI Pipeline (Python)
+**Location:** `front-end/pwa/aws-ingestion-layer/`
 
-Climsoft Web extends the proven foundation of **Climsoft v4**, re-architected for modern infrastructures.
-Once feature-parity is achieved, it will form the basis of **Climsoft v6**, with the web platform serving as the core system for data management across multiple NMHSs.
-It maintains **full backward compatibility** with legacy Climsoft databases and supports seamless migration pathways.
-
----
-
-### 🌱 Broader Vision
-
-Beyond a data management plaform, Climsoft Web aims to evolve into a full **Climate & Hydrology Data Platform** that supports easy data access, regional integration, and AI-assisted analytics for transforming environmental data into actionable insights.
-Its long-term goal is to empower countries to build resilient, data-driven services that underpin **climate adaptation**, **renewable-energy development**, and **high precision agriculture**.
+- Trained a **4-model ensemble** on 893,398 historical LMS climate observations
+- Models: Z-Score baseline, Isolation Forest, One-Class SVM, Autoencoder (TensorFlow/Keras)
+- Ensemble decision layer: NORMAL / SUSPECT / FAILED classifications
+- **Groq API** (llama-3.3-70b-versatile) generates contextual reviewer explanations
+- Output: 714,816 scored predictions, 116,443 QC review handoff rows
+- Ensemble anomaly rate: 6.55% (11,700 review candidates from 178,704 scored)
 
 ---
 
-### 🤝 Contributing
+## 2. QC Review Workspace (Angular — built from scratch)
+**Location:** `front-end/pwa/src/app/quality-control/`
 
-Climsoft Web is a community-driven open-source initiative.
-We welcome contributions from developers, climate scientists, hydrologists, and institutions committed to strengthening environmental data systems across the globe.
+- Unified QC Review Queue: rule-based QC + ML anomaly decisions in one view
+- AI evidence panel: score, confidence, model agreement, Z-score signals, Groq explanation
+- **Approve / Override / Escalate** reviewer decision controls
+- Reviewer feedback loop: decisions persisted to PostgreSQL for Random Forest training
+- Demonstrated with LESBER07 tmax FAILED case: AI Score 0.947, confidence 96%, rolling Z-score -5.86
 
-### 📚 Source Code, Installation and Guides
+---
 
-This repository contains the source code distribution of the Climsoft Web.
+## 3. AI Anomaly Management Centre (Angular — built from scratch)
+**Location:** `front-end/pwa/src/app/quality-control/ai-anomaly-management/`
 
-Copyright and license information can be found in the file COPYRIGHT.
+- Live dashboard: 893,398 clean rows, 714,816 predictions, Groq status
+- Model performance table (4 individual models + ensemble)
+- Groq-powered AI Climate QC Assistant with natural language summaries
 
-General documentation about this version of Climsoft Web can be found at [https://www.climsoft.org/docs/](https://docs.google.com/document/d/1VKiTcGnmF42iKSrzLFWt0UGz-JqOQ6lcTfW_Lm3ML0s/edit?usp=sharing) . In particular, information about building Climsoft Web from the source code can be found at [https://www.climsoft.org/docs/dev/installation.html](https://docs.google.com/document/d/1u_tL9bR9g6uIg7y96jPTykySiaJpVAwTX0YZhgCancU/edit?usp=sharing).
+---
 
-The latest version of this software, and related software, may be obtained at [https://www.climsoft.org/climsoft-web/releases/](https://github.com/climsoft/climsoft-web/releases). For more information look at our web site located at [https://www.climsoft.org](https://www.climsoft.org) .
+## 4. Real-Time Observation Scoring (NestJS — built from scratch)
+**Location:** `back-end/api/src/observation-ai/`
 
+- Event-driven: every new observation automatically triggers AI assessment
+- `ObservationAnomalyJobService` — async per-key scoring, deduplication guard
+- `ObservationGroqExplanationService` — Groq LLM explanations for FAILED/SUSPECT
+- `ReviewerDecisionService` — persists reviewer decisions for Random Forest training
+- `LmsAiOutputService` — serves AI pipeline outputs to the frontend
+
+---
+
+## 5. Security and Governance (built from scratch)
+**Location:** `back-end/api/src/audit/`, `back-end/api/src/shared/transformers/`
+
+| Feature | Implementation |
+|---|---|
+| RBAC | NestJS AuthGuard (global) + AuthorisedStationsPipe (station-scoped) |
+| Rate limiting | ThrottlerGuard: 100 req/min general, 5 req/min login (brute force protection) |
+| HTTP security headers | Helmet: XSS, clickjacking, MIME sniffing protection |
+| Encryption at rest | AES-256-CBC EncryptionTransformer on user PII columns |
+| Immutable audit log | audit_logs table: LOGIN, LOGOUT, CREATE, QC_DECISION with IP and timestamp |
+| Backup and DR | scripts/backup.sh: daily pg_dump, 30-day retention, WMO-No.1131 aligned |
+
+---
+
+## 6. Reviewer Feedback Loop (built from scratch)
+**Location:** `back-end/api/src/observation-ai/entities/reviewer-decision.entity.ts`
+
+- Every Approve/Override/Escalate persists to `reviewer_decisions` PostgreSQL table
+- `findLabelledExamples()` joins decisions with AI feature snapshots — training data for Random Forest
+- `GET /lms-ai/decision-stats` tracks progress toward 500-decision RF training threshold
+- After 500 decisions, Random Forest becomes the 5th ensemble model
+
+---
+
+## 7. OpenStack Kubernetes Deployment (built from scratch)
+**Location:** `k8s/`
+
+- 7 Kubernetes manifests: namespace, configmap, secret placeholder, 50Gi Cinder PVC,
+  two Deployments (API + frontend), two Services (ClusterIP + LoadBalancer), CronJob
+- Daily LMS AI pipeline CronJob at 02:00 UTC
+- All 7 YAML files validated: 7/7 valid
+- 5-command quick-start in k8s/README.md
+- Disaster recovery: `docs/disaster-recovery.md` (4-hour RTO, WMO-No.1131)
+
+---
+
+## 8. Data Entry and Station ID Fix
+- Legacy Climsoft stores station IDs with leading whitespace (` LESLER01` not `LESLER01`)
+- Applied TRIM() fix across 6 files: backend SQL queries, frontend cache, form definitions
+- Also fixed: form context persistence (localStorage), empty state message, browser refresh reload
+
+---
+
+## What We Built vs What Came From Climsoft
+
+| Feature | From Climsoft | Our Engineering |
+|---|---|---|
+| Basic data entry forms | Yes | Extended: TRIM fix, localStorage context, empty state |
+| Station/element metadata | Yes | Extended: live sync to mobile, trim-tolerant cache |
+| Rule-based QC | Basic | Extended: AI ensemble layer on top |
+| User authentication | Basic | Extended: RBAC, rate limiting, Helmet, TLS |
+| Database schema | Observations table | Added 4 new tables, migration v0.0.8 |
+| QC Review Workspace | None | Built entirely from scratch |
+| AI Anomaly Management | None | Built entirely from scratch |
+| Groq LLM integration | None | Built entirely from scratch |
+| Audit logging | None | Built entirely from scratch |
+| AES-256 encryption | None | Built entirely from scratch |
+| Kubernetes manifests | None | Built entirely from scratch |
+| Backup scripts | None | Built entirely from scratch |
+| Mobile offline PWA | None | Built entirely (separate repo) |
+
+---
+
+## Test Results
 
