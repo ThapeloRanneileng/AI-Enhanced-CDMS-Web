@@ -1,5 +1,4 @@
-python3 << 'PYEOF'
-content = '''# AI-Enhanced Climate Data Management System for Lesotho
+ AI-Enhanced Climate Data Management System for Lesotho
 
 > **B.Eng Computer Systems and Networks — Final Year Project**  
 > > National University of Lesotho, Department of Mathematics and Computer Science  
