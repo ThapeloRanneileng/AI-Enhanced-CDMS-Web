@@ -1,6 +1,7 @@
 import { Check, Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { UserGroupEntity } from "./user-group.entity";
 import { UserPermissionDto } from "../dtos/permissions/user-permission.dto";
+import { EncryptionTransformer } from "src/shared/transformers/encryption.transformer";
 
 @Entity("users")
 @Check("CHK_users_name_not_empty", `"name" <> ''`)
@@ -15,7 +16,7 @@ export class UserEntity {
   @Column({ name: "name", type: 'varchar' })
   name: string;
 
-  @Column({ name: "email", type: "varchar", unique: true })
+  @Column({ name: "email", type: "varchar", unique: true, transformer: new EncryptionTransformer() })
   email: string;
 
   @Column({ type: "varchar", unique: true , nullable: true })

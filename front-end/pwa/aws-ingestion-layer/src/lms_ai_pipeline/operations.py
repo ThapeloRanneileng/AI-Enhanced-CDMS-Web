@@ -139,11 +139,29 @@ def count_rows(path: Path) -> int:
     return int(metadata["rowCount"] or 0)
 
 
-def build_manifest(run_context: Dict[str, object], config: object | None, total_prediction_rows: int) -> Dict[str, object]:
+def default_genai_metadata() -> Dict[str, str]:
+    provider = os.environ.get("LMS_GENAI_PROVIDER", "template")
+    return {
+        "requestedGenaiProvider": provider,
+        "effectiveGenaiProvider": provider,
+        "genaiProvider": provider,
+        "genaiProviderStatus": "success",
+        "genaiFallbackReason": "",
+    }
+
+
+def build_manifest(
+    run_context: Dict[str, object],
+    config: object | None,
+    total_prediction_rows: int,
+    genai_metadata: Dict[str, str] | None = None,
+) -> Dict[str, object]:
     finished_at = utc_now_iso()
     autoencoder_status = read_csv(AUTOENCODER_STATUS_FILE) if AUTOENCODER_STATUS_FILE.exists() else []
     autoencoder = autoencoder_status[0] if autoencoder_status else {}
     runtime_seconds = time.monotonic() - float(run_context.get("startedMonotonic", time.monotonic()))
+    genai_fields = {**default_genai_metadata(), **(genai_metadata or {})}
+    genai_fields["genaiProvider"] = genai_fields.get("effectiveGenaiProvider", genai_fields.get("genaiProvider", "template"))
     return {
         "runId": run_context.get("runId", ""),
         "runStartedAt": run_context.get("runStartedAt", ""),
@@ -157,7 +175,7 @@ def build_manifest(run_context: Dict[str, object], config: object | None, total_
         "platform": platform_module.platform(),
         "commandLine": " ".join(sys.argv),
         "environmentMode": os.environ.get("LMS_ENVIRONMENT_MODE", "local-dev"),
-        "genaiProvider": os.environ.get("LMS_GENAI_PROVIDER", "template"),
+        **genai_fields,
         "inputFiles": [file_metadata(path) for path in input_file_paths()],
         "outputFiles": [file_metadata(path) for path in output_file_paths()],
         "totalInputRows": count_rows(INPUT_FILE),
@@ -178,8 +196,13 @@ def build_manifest(run_context: Dict[str, object], config: object | None, total_
     }
 
 
-def write_manifest(run_context: Dict[str, object], config: object | None, total_prediction_rows: int) -> Dict[str, object]:
-    manifest = build_manifest(run_context, config, total_prediction_rows)
+def write_manifest(
+    run_context: Dict[str, object],
+    config: object | None,
+    total_prediction_rows: int,
+    genai_metadata: Dict[str, str] | None = None,
+) -> Dict[str, object]:
+    manifest = build_manifest(run_context, config, total_prediction_rows, genai_metadata)
     PIPELINE_RUN_MANIFEST_FILE.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # Refresh manifest metadata now that the manifest exists.
     manifest["outputFiles"] = [file_metadata(path) for path in output_file_paths()]

@@ -227,7 +227,7 @@ export class StationsService implements OnModuleInit {
 
     private createViewDto(entity: StationEntity): CreateStationDto {
         return {
-            id: entity.id,
+            id: entity.id.trim(),
             name: entity.name,
             description: entity.description || undefined,
             longitude: entity.location?.coordinates[0] || undefined,

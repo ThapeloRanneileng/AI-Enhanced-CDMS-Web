@@ -25,6 +25,7 @@ from lms_ai_pipeline.models import (
 )
 from lms_ai_pipeline import inspect as inspect_module
 from lms_ai_pipeline import pipeline
+from lms_ai_pipeline import genai, operations
 
 
 def test_lms_inspection_detects_station_counts_and_warnings():
@@ -367,6 +368,111 @@ def test_lms_epoch_config_parsing(monkeypatch):
     assert args.autoencoder_min_group_rows == 25
 
 
+def configure_genai_test_paths(monkeypatch, tmp_path: Path) -> tuple[Path, Path, Path, Path]:
+    ensemble_file = tmp_path / "lms_ensemble_anomaly_predictions.csv"
+    report_file = tmp_path / "lms_model_evaluation_summary.json"
+    summary_file = tmp_path / "lms_genai_model_summary.md"
+    explanations_file = tmp_path / "lms_genai_reviewer_explanations.csv"
+    monkeypatch.setattr(genai, "ENSEMBLE_PREDICTIONS_FILE", ensemble_file)
+    monkeypatch.setattr(genai, "MODEL_EVALUATION_SUMMARY_JSON", report_file)
+    monkeypatch.setattr(genai, "GENAI_MODEL_SUMMARY_FILE", summary_file)
+    monkeypatch.setattr(genai, "GENAI_REVIEWER_EXPLANATIONS_FILE", explanations_file)
+    ensemble_file.write_text(
+        "stationId,observationDatetime,elementCode,finalDecision,severity,confidence,anomalyScore,modelAgreementCount,explanation\n"
+        "LES001,2020-01-01,rain,SUSPECT,MEDIUM,0.80,3.2,2,Template ensemble explanation\n",
+        encoding="utf-8",
+    )
+    report_file.write_text(json.dumps({"modelMetrics": {"Ensemble": {"anomalyRate": 0.1}}}), encoding="utf-8")
+    return ensemble_file, report_file, summary_file, explanations_file
+
+
+def test_lms_genai_template_provider_outputs_template(monkeypatch, tmp_path: Path):
+    _, _, summary_file, explanations_file = configure_genai_test_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "template")
+
+    metadata = genai.generate_genai_outputs()
+    rows = read_csv(explanations_file)
+
+    assert metadata.as_manifest_fields() == {
+        "requestedGenaiProvider": "template",
+        "effectiveGenaiProvider": "template",
+        "genaiProvider": "template",
+        "genaiProviderStatus": "success",
+        "genaiFallbackReason": "",
+    }
+    assert "provider=template" in summary_file.read_text(encoding="utf-8")
+    assert rows[0]["provider"] == "template"
+
+
+def test_lms_genai_gemini_requested_mocked_success_outputs_gemini(monkeypatch, tmp_path: Path):
+    _, _, summary_file, explanations_file = configure_genai_test_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-test-key-not-real")
+
+    def fake_complete(self, prompt: str, max_tokens: int) -> str:
+        if max_tokens == 900:
+            return "# LMS GenAI Model Summary\n\nprovider=gemini\n\nGemini summary."
+        return "Gemini reviewer explanation."
+
+    monkeypatch.setattr(genai.GeminiProvider, "complete", fake_complete)
+
+    metadata = genai.generate_genai_outputs()
+    rows = read_csv(explanations_file)
+
+    assert metadata.as_manifest_fields()["requestedGenaiProvider"] == "gemini"
+    assert metadata.as_manifest_fields()["effectiveGenaiProvider"] == "gemini"
+    assert metadata.as_manifest_fields()["genaiProviderStatus"] == "success"
+    assert "provider=gemini" in summary_file.read_text(encoding="utf-8")
+    assert rows[0]["provider"] == "gemini"
+
+
+def test_lms_genai_gemini_requested_mocked_failure_outputs_template_with_reason(monkeypatch, tmp_path: Path):
+    _, _, summary_file, explanations_file = configure_genai_test_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", "unit-test-key-not-real")
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+
+    def failing_complete(self, prompt: str, max_tokens: int) -> str:
+        raise RuntimeError("Gemini authentication failed for unit-test-key-not-real")
+
+    monkeypatch.setattr(genai.GeminiProvider, "complete", failing_complete)
+
+    metadata = genai.generate_genai_outputs()
+    fields = metadata.as_manifest_fields()
+    rows = read_csv(explanations_file)
+    summary = summary_file.read_text(encoding="utf-8")
+
+    assert fields["requestedGenaiProvider"] == "gemini"
+    assert fields["effectiveGenaiProvider"] == "template"
+    assert fields["genaiProvider"] == "template"
+    assert fields["genaiProviderStatus"] == "fallback"
+    assert "RuntimeError" in fields["genaiFallbackReason"]
+    assert "unit-test-key-not-real" not in fields["genaiFallbackReason"]
+    assert "provider=template" in summary
+    assert "status=fallback" in summary
+    assert rows[0]["provider"] == "template"
+
+
+def test_lms_manifest_provider_fields_are_truthful(monkeypatch):
+    monkeypatch.setenv("LMS_GENAI_PROVIDER", "gemini")
+    run_context = {"runId": "test-run", "runStartedAt": "2020-01-01T00:00:00Z", "startedMonotonic": 1.0}
+    metadata = {
+        "requestedGenaiProvider": "gemini",
+        "effectiveGenaiProvider": "template",
+        "genaiProvider": "template",
+        "genaiProviderStatus": "fallback",
+        "genaiFallbackReason": "RuntimeError: Gemini failed",
+    }
+
+    manifest = operations.build_manifest(run_context, AutoencoderConfig(), 12, metadata)
+
+    assert manifest["requestedGenaiProvider"] == "gemini"
+    assert manifest["effectiveGenaiProvider"] == "template"
+    assert manifest["genaiProvider"] == "template"
+    assert manifest["genaiProviderStatus"] == "fallback"
+    assert manifest["genaiFallbackReason"] == "RuntimeError: Gemini failed"
+
+
 def test_lms_autoencoder_prediction_schema():
     row = build_prediction(feature_row(1), "Autoencoder", 0.123, "SUSPECT", "MEDIUM", "0.75", "Autoencoder reconstruction error is high.")
 
@@ -654,9 +760,11 @@ def test_lms_genai_template_fallback(tmp_path: Path, monkeypatch):
     (tmp_path / "ensemble.csv").write_text("stationId,observationDatetime,elementCode,finalDecision,outcome,severity,confidence,modelAgreementCount,anomalyScore,explanation\nLESBUT01,2020-01-01,rain,SUSPECT,SUSPECT,MEDIUM,0.7,1,2,review\n", encoding="utf-8")
     (tmp_path / "summary.json").write_text("{}", encoding="utf-8")
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "template"
+    assert metadata.requestedProvider == "microsoft_copilot"
+    assert metadata.effectiveProvider == "template"
+    assert metadata.status == "fallback"
     assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "template" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
@@ -700,9 +808,11 @@ def test_lms_genai_gemini_missing_key_falls_back_to_groq(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(genai, "_post_json", fake_post_json)
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "groq"
+    assert metadata.requestedProvider == "gemini"
+    assert metadata.effectiveProvider == "groq"
+    assert metadata.status == "fallback"
     assert "provider=groq" in (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "groq,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
@@ -715,9 +825,11 @@ def test_lms_genai_gemini_missing_keys_falls_back_to_template(tmp_path: Path, mo
     patch_genai_paths(genai, tmp_path, monkeypatch)
     write_genai_fixture(tmp_path)
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "template"
+    assert metadata.requestedProvider == "gemini"
+    assert metadata.effectiveProvider == "template"
+    assert metadata.status == "fallback"
     assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
@@ -732,9 +844,12 @@ def test_lms_genai_gemini_api_failure_falls_back_safely(tmp_path: Path, monkeypa
     write_genai_fixture(tmp_path)
     monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("failed")))
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "gemini"
+    assert metadata.requestedProvider == "gemini"
+    assert metadata.effectiveProvider == "template"
+    assert metadata.status == "fallback"
+    assert metadata.fallbackReason
     assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
@@ -749,9 +864,12 @@ def test_lms_genai_gemini_empty_candidates_falls_back_safely(tmp_path: Path, mon
     write_genai_fixture(tmp_path)
     monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: {"promptFeedback": {"blockReason": "SAFETY"}})
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "gemini"
+    assert metadata.requestedProvider == "gemini"
+    assert metadata.effectiveProvider == "template"
+    assert metadata.status == "fallback"
+    assert metadata.fallbackReason
     assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
@@ -766,9 +884,12 @@ def test_lms_genai_groq_api_failure_falls_back_safely(tmp_path: Path, monkeypatc
     write_genai_fixture(tmp_path)
     monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("failed")))
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "groq"
+    assert metadata.requestedProvider == "groq"
+    assert metadata.effectiveProvider == "template"
+    assert metadata.status == "fallback"
+    assert metadata.fallbackReason
     assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "template,LES00000" in (tmp_path / "explanations.csv").read_text(encoding="utf-8")
 
@@ -807,9 +928,11 @@ def test_lms_genai_template_provider_uses_no_network(tmp_path: Path, monkeypatch
     write_genai_fixture(tmp_path)
     monkeypatch.setattr(genai, "_post_json", lambda *args, **kwargs: pytest.fail("template provider must not call network"))
 
-    provider = genai.generate_genai_outputs()
+    metadata = genai.generate_genai_outputs()
 
-    assert provider.name == "template"
+    assert metadata.requestedProvider == "template"
+    assert metadata.effectiveProvider == "template"
+    assert metadata.status == "success"
     assert "provider=template" in (tmp_path / "summary.md").read_text(encoding="utf-8")
 
 

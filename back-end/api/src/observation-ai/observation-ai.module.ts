@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ElementEntity } from 'src/metadata/elements/entities/element.entity';
 import { StationEntity } from 'src/metadata/stations/entities/station.entity';
@@ -7,6 +7,7 @@ import { ObservationEntity } from 'src/observation/entities/observation.entity';
 import { ObservationAnomalyAssessmentEntity } from './entities/observation-anomaly-assessment.entity';
 import { ObservationAnomalyModelEntity } from './entities/observation-anomaly-model.entity';
 import { ObservationAnomalyTrainingRunEntity } from './entities/observation-anomaly-training-run.entity';
+import { ReviewerDecisionEntity } from './entities/reviewer-decision.entity';
 import { AnomalyFeatureBuilderService } from './services/anomaly-feature-builder.service';
 import { AnomalyModelRegistryService } from './services/anomaly-model-registry.service';
 import { ObservationAnomalyDetectionService } from './services/observation-anomaly-detection.service';
@@ -18,6 +19,7 @@ import { ObservationAnomalyTrainingController } from './controllers/observation-
 import { LmsAiController } from './controllers/lms-ai.controller';
 import { UserModule } from 'src/user/user.module';
 import { ObservationGenerativeReviewAssistanceService } from './services/observation-generative-review-assistance.service';
+import { ObservationGroqExplanationService } from './services/observation-groq-explanation.service';
 import { AnomalyTrainingDataPreparationService } from './services/anomaly-training-data-preparation.service';
 import { AnomalyProxyTrainingSourceService } from './services/anomaly-proxy-training-source.service';
 import { AnomalyModelTrainingService } from './services/anomaly-model-training.service';
@@ -25,6 +27,8 @@ import { AnomalyBaselineModelService } from './services/anomaly-baseline-model.s
 import { AnomalyModelPersistenceService } from './services/anomaly-model-persistence.service';
 import { AnomalyModelRegistryLoaderService } from './services/anomaly-model-registry-loader.service';
 import { LmsAiOutputService } from './services/lms-ai-output.service';
+import { ReviewerDecisionService } from './services/reviewer-decision.service';
+import { AuditModule } from 'src/audit/audit.module';
 
 @Module({
   imports: [
@@ -33,11 +37,13 @@ import { LmsAiOutputService } from './services/lms-ai-output.service';
       ObservationAnomalyAssessmentEntity,
       ObservationAnomalyModelEntity,
       ObservationAnomalyTrainingRunEntity,
+      ReviewerDecisionEntity,
       StationEntity,
       ElementEntity,
       SourceSpecificationEntity,
     ]),
     UserModule,
+    forwardRef(() => AuditModule),
   ],
   controllers: [
     ObservationAnomalyAssessmentsController,
@@ -55,10 +61,12 @@ import { LmsAiOutputService } from './services/lms-ai-output.service';
     AnomalyModelTrainingService,
     ObservationAnomalyDetectionService,
     ObservationGenerativeReviewAssistanceService,
+    ObservationGroqExplanationService,
     ObservationAnomalyAssessmentService,
     ObservationAnomalyJobService,
     ObservationAnomalyAssessmentsQueryService,
     LmsAiOutputService,
+    ReviewerDecisionService,
   ],
   exports: [
     AnomalyFeatureBuilderService,

@@ -36,3 +36,6 @@ lerna-debug.log*
 
 # Production environment directories
 /temp
+
+# TLS certificates — never commit private keys or certs
+/tls

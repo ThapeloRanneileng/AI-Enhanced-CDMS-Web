@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Equal, FindManyOptions, FindOperator, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, Equal, FindManyOptions, FindOperator, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Raw, Repository } from 'typeorm';
 import { ObservationAnomalyAssessmentEntity } from '../entities/observation-anomaly-assessment.entity';
 import { ViewObservationAnomalyAssessmentDto } from '../dtos/view-observation-anomaly-assessment.dto';
 import { ViewObservationAnomalyAssessmentQueryDto } from '../dtos/view-observation-anomaly-assessment-query.dto';
@@ -53,9 +53,10 @@ export class ObservationAnomalyAssessmentsQueryService {
 
     const entities = await this.anomalyAssessmentRepo.find(findOptions);
     if (entities.length === 0 && queryDto.stationIds?.length === 1 && queryDto.elementIds?.length === 1 && queryDto.intervals?.length === 1 && queryDto.sourceIds?.length === 1 && queryDto.fromDate && queryDto.toDate && queryDto.fromDate === queryDto.toDate) {
+      const stationId = queryDto.stationIds[0].trim();
       const nearbyAssessments = await this.anomalyAssessmentRepo.find({
         where: {
-          stationId: queryDto.stationIds[0],
+          stationId,
           elementId: queryDto.elementIds[0],
           level: queryDto.level,
           interval: queryDto.intervals[0],
@@ -70,7 +71,7 @@ export class ObservationAnomalyAssessmentsQueryService {
 
       this.logger.warn(`No anomaly assessment rows found for exact datetime lookup ${requestedDate.toISOString()}`);
       this.logger.warn(`Anomaly assessment query diagnostics: ${JSON.stringify({
-        stationId: queryDto.stationIds[0],
+        stationId,
         elementId: queryDto.elementIds[0],
         level: queryDto.level,
         interval: queryDto.intervals[0],
@@ -87,8 +88,9 @@ export class ObservationAnomalyAssessmentsQueryService {
     }
 
     return Promise.all(entities.map(async (entity) => {
+      const stationId = entity.stationId.trim();
       const observation = await this.observationRepo.findOneBy({
-        stationId: entity.stationId,
+        stationId,
         elementId: entity.elementId,
         level: entity.level,
         datetime: entity.datetime,
@@ -100,7 +102,7 @@ export class ObservationAnomalyAssessmentsQueryService {
 
       return {
         id: entity.id,
-        stationId: entity.stationId,
+        stationId,
         elementId: entity.elementId,
         level: entity.level,
         datetime: entity.datetime.toISOString(),
@@ -167,6 +169,25 @@ export class ObservationAnomalyAssessmentsQueryService {
             'add_reviewer_comment',
           ],
         } : null,
+        externalReviewMetadata: entity.generativeExplanation ? {
+          recordId: `${stationId}_${entity.elementId}_${entity.datetime.toISOString()}`,
+          stationId,
+          observationDatetime: entity.datetime.toISOString(),
+          elementCode: String(entity.elementId),
+          value: String(observation?.value ?? ''),
+          qcStatus: observation?.qcStatus ?? '',
+          mlStatus: entity.outcome,
+          finalDecision,
+          severity: entity.severity,
+          anomalyType: entity.featureSnapshot?.['modelAgreementCount'] != null
+            ? `${entity.featureSnapshot['modelAgreementCount']} model(s) agree`
+            : entity.assessmentType,
+          explanationSummary: entity.generativeExplanation.summary,
+          recommendedAction: entity.generativeExplanation.suggestedReviewerAction,
+          modelVersion: entity.modelVersion,
+          engineVersion: entity.generativeExplanation.provider ?? 'backend_ml_template',
+          runTimestamp: entity.createdAt.toISOString(),
+        } : null,
         createdByUserId: entity.createdByUserId,
         createdAt: entity.createdAt.toISOString(),
       };
@@ -181,7 +202,12 @@ export class ObservationAnomalyAssessmentsQueryService {
     const whereOptions: FindOptionsWhere<ObservationAnomalyAssessmentEntity> = {};
 
     if (queryDto.stationIds) {
-      whereOptions.stationId = queryDto.stationIds.length === 1 ? queryDto.stationIds[0] : In(queryDto.stationIds);
+      const stationIds = queryDto.stationIds.map(stationId => stationId.trim()).filter(Boolean);
+      if (stationIds.length === 1) {
+        whereOptions.stationId = Raw(alias => `TRIM(${alias}) = :stationId`, { stationId: stationIds[0] });
+      } else if (stationIds.length > 1) {
+        whereOptions.stationId = Raw(alias => `TRIM(${alias}) IN (:...stationIds)`, { stationIds });
+      }
     }
 
     if (queryDto.elementIds) {

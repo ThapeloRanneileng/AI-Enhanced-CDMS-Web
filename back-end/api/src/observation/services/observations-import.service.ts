@@ -155,7 +155,7 @@ export class ObservationImportService {
             // Cast flag from VARCHAR to observations_flag_enum type
             const upsertQuery = `
                     INSERT INTO observations (${TabularImportTransformer.STATION_ID_PROPERTY_NAME}, ${TabularImportTransformer.ELEMENT_ID_PROPERTY_NAME}, ${TabularImportTransformer.LEVEL_PROPERTY_NAME}, ${TabularImportTransformer.DATE_TIME_PROPERTY_NAME}, ${TabularImportTransformer.INTERVAL_PROPERTY_NAME}, ${TabularImportTransformer.SOURCE_ID_PROPERTY_NAME}, ${TabularImportTransformer.VALUE_PROPERTY_NAME}, ${TabularImportTransformer.FLAG_PROPERTY_NAME}, ${TabularImportTransformer.COMMENT_PROPERTY_NAME}, ${TabularImportTransformer.ENTRY_USER_ID_PROPERTY_NAME})
-                    SELECT ${TabularImportTransformer.STATION_ID_PROPERTY_NAME}, ${TabularImportTransformer.ELEMENT_ID_PROPERTY_NAME}, ${TabularImportTransformer.LEVEL_PROPERTY_NAME}, ${TabularImportTransformer.DATE_TIME_PROPERTY_NAME}, ${TabularImportTransformer.INTERVAL_PROPERTY_NAME}, ${TabularImportTransformer.SOURCE_ID_PROPERTY_NAME}, ${TabularImportTransformer.VALUE_PROPERTY_NAME}, ${TabularImportTransformer.FLAG_PROPERTY_NAME}::observations_flag_enum, ${TabularImportTransformer.COMMENT_PROPERTY_NAME}, ${TabularImportTransformer.ENTRY_USER_ID_PROPERTY_NAME}
+                    SELECT TRIM(${TabularImportTransformer.STATION_ID_PROPERTY_NAME}), ${TabularImportTransformer.ELEMENT_ID_PROPERTY_NAME}, ${TabularImportTransformer.LEVEL_PROPERTY_NAME}, ${TabularImportTransformer.DATE_TIME_PROPERTY_NAME}, ${TabularImportTransformer.INTERVAL_PROPERTY_NAME}, ${TabularImportTransformer.SOURCE_ID_PROPERTY_NAME}, ${TabularImportTransformer.VALUE_PROPERTY_NAME}, ${TabularImportTransformer.FLAG_PROPERTY_NAME}::observations_flag_enum, ${TabularImportTransformer.COMMENT_PROPERTY_NAME}, ${TabularImportTransformer.ENTRY_USER_ID_PROPERTY_NAME}
                     FROM ${stagingTableName}
                     ON CONFLICT (${TabularImportTransformer.STATION_ID_PROPERTY_NAME}, ${TabularImportTransformer.ELEMENT_ID_PROPERTY_NAME}, ${TabularImportTransformer.LEVEL_PROPERTY_NAME}, ${TabularImportTransformer.DATE_TIME_PROPERTY_NAME}, ${TabularImportTransformer.INTERVAL_PROPERTY_NAME}, ${TabularImportTransformer.SOURCE_ID_PROPERTY_NAME})
                     DO UPDATE SET
@@ -169,7 +169,7 @@ export class ObservationImportService {
 
             const savedObservationKeys: ObservationPrimaryKey[] = await queryRunner.query(`
                     SELECT DISTINCT
-                        ${TabularImportTransformer.STATION_ID_PROPERTY_NAME} AS "stationId",
+                        TRIM(${TabularImportTransformer.STATION_ID_PROPERTY_NAME}) AS "stationId",
                         ${TabularImportTransformer.ELEMENT_ID_PROPERTY_NAME} AS "elementId",
                         ${TabularImportTransformer.LEVEL_PROPERTY_NAME} AS "level",
                         ${TabularImportTransformer.DATE_TIME_PROPERTY_NAME} AS "datetime",
@@ -185,7 +185,7 @@ export class ObservationImportService {
 
             this.eventEmitter.emit('observations.saved', {
                 observationKeys: savedObservationKeys.map((row) => ({
-                    stationId: row.stationId,
+                    stationId: row.stationId.trim(),
                     elementId: Number(row.elementId),
                     level: Number(row.level),
                     datetime: new Date(row.datetime),

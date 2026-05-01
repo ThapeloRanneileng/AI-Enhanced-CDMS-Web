@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { Component, ElementRef, isDevMode, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { Location } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { PagesDataService, ToastEventTypeEnum } from 'src/app/core/services/pages-data.service';
@@ -136,6 +136,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected observationAnomalyAssessmentsByKey: Map<string, ViewObservationAnomalyAssessmentModel> = new Map<string, ViewObservationAnomalyAssessmentModel>();
 
   protected observationEntries: ObservationEntry[] = [];
+  protected noSavedDataFound: boolean = false;
   protected selectedGridObservation: ObservationEntry | null = null;
   protected selectedObservationAnomalyAssessment: ViewObservationAnomalyAssessmentModel | null = null;
   protected isSelectedObservationAnomalyLoading: boolean = false;
@@ -145,6 +146,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
   protected anomalyRefreshLogMessage: string = '';
 
   private currentUserEmail: string = '';
+  private formContextKey: string = '';
 
   private destroy$ = new Subject<void>();
 
@@ -180,6 +182,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     const stationId = this.route.snapshot.params['stationid'];
     const sourceId = +this.route.snapshot.params['sourceid'];
     this.openedFromFormCatalog = this.route.snapshot.queryParams['from'] === 'forms';
+    this.formContextKey = `entry_form_ctx_${stationId}_${sourceId}`;
 
     this.cachedMetadataService.allMetadataLoaded.pipe(
       takeUntil(this.destroy$),
@@ -190,6 +193,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
       this.source = this.cachedMetadataService.getSource(sourceId);
       this.formDefinitions = new FormEntryDefinition(this.station, this.source, this.cachedMetadataService);
 
+      this.restoreFormContext();
       this.loadObservations();
 
       /** Gets default date value (YYYY-MM-DD) used by date selector */
@@ -242,6 +246,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     // Reset controls
     this.totalIsValid = false;
     this.refreshLayout = false;
+    this.noSavedDataFound = false;
     this.observationEntries = [];
     this.duplicateObservations = new Map<string, ViewObservationModel>();
     this.observationAnomalyAssessmentsByKey = new Map<string, ViewObservationAnomalyAssessmentModel>();
@@ -251,9 +256,25 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     });
 
     const entryFormObsQuery: EntryFormObservationQueryModel = this.formDefinitions.createObservationQuery();
+
+    if (isDevMode()) {
+      console.debug('[DataEntry] loadObservations', {
+        stationId: entryFormObsQuery.stationId,
+        sourceId: entryFormObsQuery.sourceId,
+        interval: entryFormObsQuery.interval,
+        level: entryFormObsQuery.level,
+        fromDate: entryFormObsQuery.fromDate,
+        toDate: entryFormObsQuery.toDate,
+      });
+    }
+
     this.observationService.findEntryFormData(entryFormObsQuery).pipe(
       take(1),
     ).subscribe(data => {
+      if (isDevMode()) {
+        console.debug('[DataEntry] backend returned', data.length, 'observation(s)');
+      }
+      this.noSavedDataFound = data.length === 0;
       this.observationEntries = this.formDefinitions.createObsEntries(data);
       this.refreshLayout = true;
       // Set firts value flag to have focus ready for rapid data entry
@@ -319,8 +340,8 @@ export class FormEntryComponent implements OnInit, OnDestroy {
 
   /**
    * Handles changes in element selection by updating internal state
-   * @param id 
-   * @returns 
+   * @param id
+   * @returns
    */
   public onElementChange(id: number | null): void {
     if (id === null) {
@@ -328,13 +349,14 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     }
 
     this.formDefinitions.elementSelectorValue = id;
+    this.saveFormContext();
     this.loadObservations();
   }
 
   /**
    * Handles changes in year and month selection by updating internal state
-   * @param yearMonth 
-   * @returns 
+   * @param yearMonth
+   * @returns
    */
   protected onYearMonthChange(yearMonth: string | null): void {
     if (!yearMonth) {
@@ -343,13 +365,14 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     const splitValue = yearMonth.split('-');
     this.formDefinitions.yearSelectorValue = +splitValue[0];
     this.formDefinitions.monthSelectorValue = +splitValue[1];
+    this.saveFormContext();
     this.loadObservations();
   }
 
   /**
    * Handles changes in year, month and day selection by updating internal state
-   * @param strDate 
-   * @returns 
+   * @param strDate
+   * @returns
    */
   protected onDateChange(strDate: string | null): void {
     if (!strDate) {
@@ -359,13 +382,14 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     this.formDefinitions.yearSelectorValue = +splitValue[0];
     this.formDefinitions.monthSelectorValue = +splitValue[1];
     this.formDefinitions.daySelectorValue = +splitValue[2];
+    this.saveFormContext();
     this.loadObservations();
   }
 
   /**
    * Handles changes in hour selection by updating internal state
-   * @param hour 
-   * @returns 
+   * @param hour
+   * @returns
    */
   protected onHourChange(hour: number | null): void {
     if (hour === null) {
@@ -373,6 +397,7 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     }
 
     this.formDefinitions.hourSelectorValue = hour;
+    this.saveFormContext();
     this.loadObservations();
   }
 
@@ -658,6 +683,48 @@ export class FormEntryComponent implements OnInit, OnDestroy {
     }
   }
 
+  private saveFormContext(): void {
+    if (!this.formContextKey || !this.formDefinitions) return;
+    try {
+      const ctx = {
+        year: this.formDefinitions.yearSelectorValue,
+        month: this.formDefinitions.monthSelectorValue,
+        day: this.formDefinitions.daySelectorValue,
+        hour: this.formDefinitions.hourSelectorValue,
+        elementId: this.formDefinitions.elementSelectorValue,
+      };
+      localStorage.setItem(this.formContextKey, JSON.stringify(ctx));
+    } catch {
+      // localStorage may be unavailable (private mode); ignore
+    }
+  }
+
+  private restoreFormContext(): void {
+    if (!this.formContextKey || !this.formDefinitions) return;
+    try {
+      const raw = localStorage.getItem(this.formContextKey);
+      if (!raw) return;
+      const ctx = JSON.parse(raw) as {
+        year: number; month: number; day: number | null; hour: number | null; elementId: number | null;
+      };
+      if (typeof ctx.year === 'number') this.formDefinitions.yearSelectorValue = ctx.year;
+      if (typeof ctx.month === 'number') this.formDefinitions.monthSelectorValue = ctx.month;
+      if (ctx.day !== undefined) this.formDefinitions.daySelectorValue = ctx.day;
+      if (ctx.hour !== undefined) this.formDefinitions.hourSelectorValue = ctx.hour;
+      if (ctx.elementId !== undefined && this.formDefinitions.elementSelectorValue !== null) {
+        this.formDefinitions.elementSelectorValue = ctx.elementId;
+      }
+      // Sync the display date/year-month inputs to restored values
+      const { yearSelectorValue: y, monthSelectorValue: m, daySelectorValue: d } = this.formDefinitions;
+      this.defaultYearMonthValue = `${y}-${StringUtils.addLeadingZero(m)}`;
+      if (d) {
+        this.defaultDateValue = `${y}-${StringUtils.addLeadingZero(m)}-${StringUtils.addLeadingZero(d)}`;
+      }
+    } catch {
+      // Corrupt or missing stored context; ignore and use defaults
+    }
+  }
+
   protected onRequestLocation(): void {
     this.userLocationErrorMessage = 'Checking location...';
     this.locationService.getUserLocation().pipe(take(1)).subscribe({
@@ -856,15 +923,18 @@ export class FormEntryComponent implements OnInit, OnDestroy {
           return;
         }
         this.isSelectedObservationAnomalyLoading = false;
-        this.selectedObservationAnomalyErrorMessage = err?.error?.message || err?.message || 'Failed to load AI anomaly assessment';
+        // Advisory hint only — never show a red error. Degrade silently to the
+        // grey "No AI anomaly assessment found" message so users are not alarmed.
+        this.selectedObservationAnomalyErrorMessage = '';
+        this.selectedObservationAnomalyAssessment = null;
         if (triggeredByPostSave) {
-          this.anomalyRefreshLogMessage = 'AI anomaly refresh failed after save.';
-          console.warn('[Data Entry] AI anomaly refresh failed after save', {
-            selectedObservationKey: observationKey,
-            savedObservationCount: savedObservationKeys.length,
-            error: err,
-          });
+          this.anomalyRefreshLogMessage = 'No AI anomaly assessment available for the selected cell.';
         }
+        console.warn('[Data Entry] AI anomaly assessment not available', {
+          selectedObservationKey: observationKey,
+          status: err?.status,
+          message: err?.message,
+        });
       }
     });
   }

@@ -6,6 +6,7 @@ import { ObservationEntity } from 'src/observation/entities/observation.entity';
 import { ObservationAnomalyAssessmentEntity, ObservationAnomalyAssessmentTypeEnum } from '../entities/observation-anomaly-assessment.entity';
 import { ObservationAnomalyDetectionResult, ObservationAnomalyDetectionService } from './observation-anomaly-detection.service';
 import { ObservationGenerativeReviewAssistanceService } from './observation-generative-review-assistance.service';
+import { ObservationGroqExplanationService } from './observation-groq-explanation.service';
 
 @Injectable()
 export class ObservationAnomalyAssessmentService {
@@ -16,6 +17,7 @@ export class ObservationAnomalyAssessmentService {
     @InjectRepository(ObservationAnomalyAssessmentEntity) private anomalyAssessmentRepo: Repository<ObservationAnomalyAssessmentEntity>,
     private observationAnomalyDetectionService: ObservationAnomalyDetectionService,
     private observationGenerativeReviewAssistanceService: ObservationGenerativeReviewAssistanceService,
+    private observationGroqExplanationService: ObservationGroqExplanationService,
     private eventEmitter: EventEmitter2,
   ) { }
 
@@ -25,9 +27,11 @@ export class ObservationAnomalyAssessmentService {
     userId: number | null = null,
   ): Promise<ObservationAnomalyAssessmentEntity> {
     const detectionResult: ObservationAnomalyDetectionResult = await this.observationAnomalyDetectionService.detectObservationAnomaly(observation);
-    const generativeExplanation = this.observationGenerativeReviewAssistanceService.generateExplanation(observation, detectionResult);
+    const templateExplanation = this.observationGenerativeReviewAssistanceService.generateExplanation(observation, detectionResult);
+    const generativeExplanation = await this.observationGroqExplanationService.enrichExplanation(observation, detectionResult, templateExplanation);
+    const stationId = observation.stationId.trim();
     const assessment = this.anomalyAssessmentRepo.create({
-      stationId: observation.stationId,
+      stationId,
       elementId: observation.elementId,
       level: observation.level,
       datetime: observation.datetime,
@@ -42,7 +46,11 @@ export class ObservationAnomalyAssessmentService {
       severity: detectionResult.severity,
       outcome: detectionResult.outcome,
       reasons: detectionResult.reasons,
-      featureSnapshot: detectionResult.featureSnapshot,
+      featureSnapshot: {
+        ...detectionResult.featureSnapshot,
+        modelAgreementCount: detectionResult.contributingSignals.length,
+        provider: 'backend_ml',
+      },
       contributingSignals: detectionResult.contributingSignals,
       generativeExplanation,
       createdByUserId: userId,
@@ -61,20 +69,24 @@ export class ObservationAnomalyAssessmentService {
     assessmentType: ObservationAnomalyAssessmentTypeEnum,
     userId: number | null = null,
   ): Promise<ObservationAnomalyAssessmentEntity | null> {
-    this.logger.debug(`Attempting anomaly assessment lookup for key ${JSON.stringify({
+    const normalizedKey = {
       ...key,
-      datetime: key.datetime.toISOString(),
+      stationId: key.stationId.trim(),
+    };
+    this.logger.debug(`Attempting anomaly assessment lookup for key ${JSON.stringify({
+      ...normalizedKey,
+      datetime: normalizedKey.datetime.toISOString(),
     })}`);
-    const observation = await this.observationRepo.findOneBy(key);
+    const observation = await this.observationRepo.findOneBy(normalizedKey);
 
     if (!observation) {
       const nearbyObservations = await this.observationRepo.find({
         where: {
-          stationId: key.stationId,
-          elementId: key.elementId,
-          level: key.level,
-          interval: key.interval,
-          sourceId: key.sourceId,
+          stationId: normalizedKey.stationId,
+          elementId: normalizedKey.elementId,
+          level: normalizedKey.level,
+          interval: normalizedKey.interval,
+          sourceId: normalizedKey.sourceId,
         },
         order: {
           datetime: 'DESC',
@@ -86,15 +98,15 @@ export class ObservationAnomalyAssessmentService {
         deltaMsFromEventKey: candidate.datetime.getTime() - key.datetime.getTime(),
       }));
 
-      this.logger.warn(`Skipping anomaly assessment. Observation not found for ${key.stationId}/${key.elementId}/${key.datetime.toISOString()}`);
+      this.logger.warn(`Skipping anomaly assessment. Observation not found for ${normalizedKey.stationId}/${normalizedKey.elementId}/${normalizedKey.datetime.toISOString()}`);
       this.logger.warn(`Anomaly lookup diagnostics: ${JSON.stringify({
-        stationId: key.stationId,
-        elementId: key.elementId,
-        level: key.level,
-        interval: key.interval,
-        sourceId: key.sourceId,
-        requestedDatetimeIso: key.datetime.toISOString(),
-        requestedDatetimeEpochMs: key.datetime.getTime(),
+        stationId: normalizedKey.stationId,
+        elementId: normalizedKey.elementId,
+        level: normalizedKey.level,
+        interval: normalizedKey.interval,
+        sourceId: normalizedKey.sourceId,
+        requestedDatetimeIso: normalizedKey.datetime.toISOString(),
+        requestedDatetimeEpochMs: normalizedKey.datetime.getTime(),
         nearbyObservations: nearbyObservationDiagnostics,
       })}`);
       return null;

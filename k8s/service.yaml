@@ -1,0 +1,49 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Service A: NestJS backend API — ClusterIP (internal only)
+# The nginx reverse proxy (or an Ingress) routes /api/* to this service.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: climate-ai-api
+  namespace: climate-ai
+  labels:
+    app: climate-ai-api
+    app.kubernetes.io/part-of: climsoft-web
+spec:
+  type: ClusterIP
+  selector:
+    app: climate-ai-api
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Service B: Angular frontend — LoadBalancer (external, OpenStack Octavia)
+# OpenStack Magnum provisions an Octavia load balancer automatically.
+# The external IP appears under EXTERNAL-IP after a few minutes:
+#   kubectl get svc climate-ai-frontend -n climate-ai
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: climate-ai-frontend
+  namespace: climate-ai
+  labels:
+    app: climate-ai-frontend
+    app.kubernetes.io/part-of: climsoft-web
+  annotations:
+    # Retain the external IP across redeployments (OpenStack Octavia annotation).
+    service.beta.kubernetes.io/openstack-internal-load-balancer: "false"
+spec:
+  type: LoadBalancer
+  selector:
+    app: climate-ai-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

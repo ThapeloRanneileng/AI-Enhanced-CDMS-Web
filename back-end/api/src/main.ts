@@ -6,43 +6,35 @@ import * as session from 'express-session';
 import * as pgSession from 'connect-pg-simple';
 import { Pool } from 'pg';
 import * as express from 'express';
+import * as helmet from 'helmet';
+import * as fs from 'fs';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // TLS: use HTTPS when cert paths are provided, otherwise HTTP (keeps dev working)
+  const httpsOptions =
+    process.env.TLS_KEY_PATH && process.env.TLS_CERT_PATH
+      ? {
+          key: fs.readFileSync(process.env.TLS_KEY_PATH),
+          cert: fs.readFileSync(process.env.TLS_CERT_PATH),
+        }
+      : undefined;
 
-  //------------------------------------------------------
-  // TODO. Code below is meant to be an implementation of allowed origins for enforcing CORS security measures 
-  // const allowedOrigins: string[] = [];
-  // if (process.env.WEB_APP_ALLOWED_ORIGINS) {
-  //   allowedOrigins.push(...StringUtils.mapCommaSeparatedStringToStringArray(process.env.WEB_APP_ALLOWED_ORIGINS.toString()));
-  // } else {
-  //   allowedOrigins.push('http://localhost:4200');
-  // }
+  const app = await NestFactory.create(AppModule, { httpsOptions });
 
+  // Security headers: X-Frame-Options, X-Content-Type-Options, HSTS, CSP, etc.
+  app.use((helmet as any).default ? (helmet as any).default() : (helmet as any)());
+
+  // CORS: restrict to env-configured origins in production, allow all in development
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+    : null;
 
   app.enableCors({
-    // TODO. Investigate how CORS should be correctly set up to ensure support for different deployment options and security.
-    // origin:  process.env.WEB_APP_BASE_URLs ? process.env.WEB_APP_BASE_URLs : 'http://localhost:4200' , 
-    origin: (origin: any, callback: any) => {
-      //console.log(`Client Origin - ${origin}`); 
-
-      // TODO. In future implement CORs security feature to enable users to determine origin setting based on their security requirements.
-      callback(null, true); // Allow the request
-
-
-      // TODO Code below is meant to enfors allowed origins
-      // Allow requests with no `Origin` (e.g., from desktop and mobile apps)
-      // Only allows requests from trusted web app origins. This is needed because web browsers require it
-      // if (!origin || allowedOrigins.includes(origin)) {
-      //   callback(null, true); // Allow the request
-      // } else {
-      //   console.error(`Origin ${origin} NOT allowed by CORS`);
-      //   callback(new Error(`Origin ${origin} NOT allowed by CORS`));
-      // }
-    },
-    credentials: true
+    origin: allowedOrigins
+      ? allowedOrigins
+      : true,
+    credentials: true,
   });
-  //------------------------------------------------------
 
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
@@ -76,7 +68,7 @@ async function bootstrap() {
       saveUninitialized: false,
       cookie: {
         maxAge: 2 * 60 * 60 * 1000,  // Set to 2 hours. Note, this is given in milliseconds.
-        secure: false, // TODO. Set to true only when using HTTPS.
+        secure: !!httpsOptions, // true when TLS is active
       },
     }),
   );

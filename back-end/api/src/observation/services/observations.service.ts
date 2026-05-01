@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, DataSource, DeleteResult, Equal, FindManyOptions, FindOperator, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Repository, UpdateResult } from 'typeorm';
+import { Between, DataSource, DeleteResult, Equal, FindManyOptions, FindOperator, FindOptionsWhere, In, LessThanOrEqual, MoreThanOrEqual, Raw, Repository, UpdateResult } from 'typeorm';
 import { ObservationEntity } from '../entities/observation.entity';
 import { CreateObservationDto } from '../dtos/create-observation.dto';
 import { ViewObservationQueryDTO } from '../dtos/view-observation-query.dto';
@@ -56,8 +56,10 @@ export class ObservationsService {
  
 
     public async findFormData(queryDto: EntryFormObservationQueryDto): Promise<ViewObservationDto[]> {
+        this.logger.debug(`[findFormData] stationId="${queryDto.stationId}" trimmed="${queryDto.stationId.trim()}" elementIds=${JSON.stringify(queryDto.elementIds)} interval=${queryDto.interval} sourceId=${queryDto.sourceId} level=${queryDto.level} from=${queryDto.fromDate} to=${queryDto.toDate}`);
+
         const entities: ObservationEntity[] = await this.observationRepo.findBy({
-            stationId: queryDto.stationId,
+            stationId: Raw(alias => `TRIM(${alias}) = :stationId`, { stationId: queryDto.stationId.trim() }),
             elementId: In(queryDto.elementIds),
             interval: queryDto.interval,
             sourceId: queryDto.sourceId,
@@ -66,6 +68,7 @@ export class ObservationsService {
             deleted: false,
         });
 
+        this.logger.debug(`[findFormData] returned ${entities.length} row(s)`);
         return this.createViewObsDtos(entities);
     }
 
@@ -100,7 +103,12 @@ export class ObservationsService {
         const whereOptions: FindOptionsWhere<ObservationEntity> = {};
 
         if (queryDto.stationIds) {
-            whereOptions.stationId = queryDto.stationIds.length === 1 ? queryDto.stationIds[0] : In(queryDto.stationIds);
+            const stationIds = queryDto.stationIds.map(stationId => stationId.trim()).filter(Boolean);
+            if (stationIds.length === 1) {
+                whereOptions.stationId = Raw(alias => `TRIM(${alias}) = :stationId`, { stationId: stationIds[0] });
+            } else if (stationIds.length > 1) {
+                whereOptions.stationId = Raw(alias => `TRIM(${alias}) IN (:...stationIds)`, { stationIds });
+            }
         }
 
         if (queryDto.elementIds) {
@@ -165,7 +173,7 @@ export class ObservationsService {
         for (const obsEntity of obsEntities) {
             const source = sourcesById.get(obsEntity.sourceId);
             const viewObs: ViewObservationDto = {
-                stationId: obsEntity.stationId,
+                stationId: obsEntity.stationId.trim(),
                 elementId: obsEntity.elementId,
                 sourceId: obsEntity.sourceId,
                 level: obsEntity.level,
@@ -249,7 +257,7 @@ export class ObservationsService {
         const obsEntities: ObservationEntity[] = [];
         for (const dto of createObservationDtos) {
             const entity: ObservationEntity = this.observationRepo.create({
-                stationId: dto.stationId,
+                stationId: dto.stationId.trim(),
                 elementId: dto.elementId,
                 level: dto.level,
                 sourceId: dto.sourceId,

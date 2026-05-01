@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -12,11 +13,14 @@ import { AppConfig } from './app.config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ObservationAiModule } from './observation-ai/observation-ai.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     UserModule,
     MetadataModule,
     ObservationModule,
@@ -24,6 +28,7 @@ import { ObservationAiModule } from './observation-ai/observation-ai.module';
     SettingsModule,
     MigrationsModule,
     QueueModule,
+    AuditModule,
     TypeOrmModule.forRoot({
       type: "postgres",
       host: AppConfig.dbCredentials.host,
@@ -39,7 +44,10 @@ import { ObservationAiModule } from './observation-ai/observation-ai.module';
 
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  ],
 })
 export class AppModule {
 }

@@ -183,8 +183,8 @@ def run_all(config: AutoencoderConfig | None = None) -> int:
     prediction_count = predict_anomalies(config, run_context=run_context)
     payload = generate_model_evaluation_report()
     generate_visualisations()
-    generate_genai_outputs()
-    manifest = write_manifest(run_context, config, prediction_count)
+    genai_metadata = generate_genai_outputs()
+    manifest = write_manifest(run_context, config, prediction_count, genai_metadata.as_manifest_fields())
     write_supervisor_summary(payload, manifest)
-    write_manifest(run_context, config, prediction_count)
+    write_manifest(run_context, config, prediction_count, genai_metadata.as_manifest_fields())
     return prediction_count

@@ -77,7 +77,7 @@ export class StationsCacheService {
 
             newCachedStations.push(
                 {
-                    id: station.id,
+                    id: station.id.trim(),
                     name: station.name,
                     description: station.description || '',
                     location: location,
@@ -147,9 +147,10 @@ export class StationsCacheService {
     }
 
     public findOne(id: string): Observable<StationCacheModel | undefined> {
+        const trimmedId = id.trim();
         return this.cachedStations.pipe(
             map(response => {
-                return response.find(item => item.id === id);
+                return response.find(item => item.id.trim() === trimmedId);
             })
         );
     }

@@ -99,6 +99,8 @@ export class QCAssessmentComponent implements OnDestroy {
   protected loadedLmsAssessmentCount: number = 0;
   protected emptyWorkspaceMessage: string = 'Try widening the date range or removing some filters.';
   protected lmsReviewWarningMessage: string = '';
+  protected reviewQueryCompleted: boolean = false;
+  protected reviewQueryErrorMessage: string = '';
   private allReviewItems: QCReviewItem[] = [];
   private readonly submittingReviewKeys = new Set<string>();
 
@@ -172,6 +174,8 @@ export class QCAssessmentComponent implements OnDestroy {
     this.loadedLmsAssessmentCount = 0;
     this.emptyWorkspaceMessage = 'Try widening the date range or removing some filters.';
     this.lmsReviewWarningMessage = '';
+    this.reviewQueryCompleted = false;
+    this.reviewQueryErrorMessage = '';
     this.selectedReviewKey = null;
     this.reviewerNotesDraft = '';
     this.correctedValueDraft = null;
@@ -183,6 +187,8 @@ export class QCAssessmentComponent implements OnDestroy {
 
   protected loadData(): void {
     this.enableQueryButton = false;
+    this.reviewQueryCompleted = false;
+    this.reviewQueryErrorMessage = '';
     this.loadingAiContext = true;
     void this.loadUnifiedReviewData();
   }
@@ -317,6 +323,20 @@ export class QCAssessmentComponent implements OnDestroy {
         message: `Reviewer decision saved as ${this.formatDecision(decision)}.`,
         type: ToastEventTypeEnum.SUCCESS
       });
+
+      // Persist decision to PostgreSQL for Random Forest labelled training data (fire-and-forget).
+      this.lmsAiService.recordReviewerDecision({
+        stationId: selectedReviewItem.stationId,
+        elementId: selectedReviewItem.elementId,
+        datetime: selectedReviewItem.observationDatetime,
+        level: selectedReviewItem.level,
+        interval: selectedReviewItem.interval,
+        sourceId: selectedReviewItem.sourceId,
+        assessmentId: selectedReviewItem.aiAssessment?.id ?? undefined,
+        decision,
+        correctedValue: decision === 'overridden' ? record.correctedValue : null,
+        reasonNote: record.reviewerNotes || undefined,
+      }).subscribe({ error: e => console.warn('[QC] reviewer-decision POST failed', e) });
     } catch (err) {
       this.pagesDataService.showToast({
         title: 'QC Review Workspace',
@@ -382,7 +402,7 @@ export class QCAssessmentComponent implements OnDestroy {
 
   protected formatAIOutcome(item: QCReviewItem): string {
     const mlStatus = item.aiAssessment?.mlAnomalyOutputs?.anomalyStatus ?? item.aiAssessment?.outcome;
-    return mlStatus ? StringUtils.formatEnumForDisplay(mlStatus) : 'No ML anomaly assessment';
+    return mlStatus ? StringUtils.formatEnumForDisplay(mlStatus) : 'Not trained';
   }
 
   protected formatAIScore(item: QCReviewItem): string {
@@ -619,8 +639,15 @@ export class QCAssessmentComponent implements OnDestroy {
         }
       }
 
+      const shouldShowRuleBasedRowsWithoutAi = allObservations.length > 0
+        && allAnomalyAssessments.length === 0
+        && lmsReviewRows.length === 0;
+      const ruleBasedObservationKeys = shouldShowRuleBasedRowsWithoutAi
+        ? observationEntries.map(entry => this.getObservationKey(entry))
+        : ruleReviewObservationKeys;
+
       const unifiedKeys = new Set<string>([
-        ...ruleReviewObservationKeys,
+        ...ruleBasedObservationKeys,
         ...assessmentMap.keys(),
         ...Object.keys(reviewState.reviews),
       ]);
@@ -644,7 +671,7 @@ export class QCAssessmentComponent implements OnDestroy {
         const awsReviewRowLoaded = !!aiAssessment;
         const reviewed = !!persistedReview;
 
-        if (!(awsReviewRowLoaded || ruleFailed || aiFlagged || reviewed)) {
+        if (!(awsReviewRowLoaded || ruleFailed || aiFlagged || reviewed || shouldShowRuleBasedRowsWithoutAi)) {
           droppedKeys.push(key);
           continue;
         }
@@ -659,9 +686,11 @@ export class QCAssessmentComponent implements OnDestroy {
           aiAssessment,
           aiConfidence: this.getAIConfidence(aiAssessment),
           aiExplanation: this.getAIExplanation(aiAssessment),
-          reviewSource: aiAssessment ? 'shared_observation_ai' : (ruleFailed ? 'rule_qc' : 'review_state'),
-          reviewReason: aiAssessment?.reasons?.join('; ') ?? failedChecks.join('; ') ?? '',
-          recommendedReviewerAction: this.getSuggestedReviewerActionFromAssessment(aiAssessment),
+          reviewSource: aiAssessment ? 'shared_observation_ai' : (entry ? 'rule_qc' : 'review_state'),
+          reviewReason: aiAssessment?.reasons?.join('; ') ?? failedChecks.join('; ') ?? (entry ? 'No AI assessments available for this station.' : ''),
+          recommendedReviewerAction: aiAssessment
+            ? this.getSuggestedReviewerActionFromAssessment(aiAssessment)
+            : 'Rule-based QC results are shown.',
           genAiProvider: aiAssessment?.externalReviewMetadata?.engineVersion ?? 'Not available',
           reviewerDecision: persistedReview?.decision ?? 'pending',
           reviewerNotes: persistedReview?.notes ?? '',
@@ -679,8 +708,10 @@ export class QCAssessmentComponent implements OnDestroy {
         this.allReviewItems.push(this.buildLmsReviewItem(row, key, persistedReview));
       }
 
-      if (allObservations.length > 0 && lmsReviewRows.length === 0 && !this.lmsReviewWarningMessage) {
-        this.lmsReviewWarningMessage = 'AI model is trained from LMS historical data. This observation can be assessed when it matches trained station/element/date support or after the scoring job is run.';
+      if (lmsReviewRows.length === 0 && !this.lmsReviewWarningMessage && !this.reviewQueryErrorMessage) {
+        this.lmsReviewWarningMessage = shouldShowRuleBasedRowsWithoutAi
+          ? 'No AI assessments available for this station. Rule-based QC results are shown.'
+          : 'No LMS AI assessments matched these filters. Rule-based QC records are shown where available.';
       }
 
       this.allReviewItems.sort((left, right) =>
@@ -697,13 +728,17 @@ export class QCAssessmentComponent implements OnDestroy {
 
       if (this.allReviewItems.length === 0) {
         this.emptyWorkspaceMessage = this.buildEmptyWorkspaceMessage();
-        this.pagesDataService.showToast({ title: 'QC Review Workspace', message: this.emptyWorkspaceMessage, type: ToastEventTypeEnum.INFO });
+        if (!this.reviewQueryErrorMessage) {
+          this.pagesDataService.showToast({ title: 'QC Review Workspace', message: this.emptyWorkspaceMessage, type: ToastEventTypeEnum.INFO });
+        }
       }
     } catch (err) {
+      this.reviewQueryErrorMessage = `${err}`;
       this.pagesDataService.showToast({ title: 'QC Review Workspace', message: `${err}`, type: ToastEventTypeEnum.ERROR });
     } finally {
       this.enableQueryButton = true;
       this.loadingAiContext = false;
+      this.reviewQueryCompleted = true;
     }
   }
 
@@ -919,7 +954,7 @@ export class QCAssessmentComponent implements OnDestroy {
 
   private buildEmptyWorkspaceMessage(): string {
     if (this.loadedObservationCount === 0 && this.loadedAnomalyAssessmentCount === 0) {
-      return 'No observations or review-ready anomaly records matched the selected filters.';
+      return 'No QC review records found for these filters. No observations, rule-based QC failures, or LMS AI assessments matched the selected station, element, source, and date range.';
     }
 
     if (this.loadedObservationCount > 0 && this.loadedRuleFailedObservationCount === 0 && this.loadedAnomalyAssessmentCount === 0) {
@@ -931,7 +966,7 @@ export class QCAssessmentComponent implements OnDestroy {
 
   private getAIExplanation(aiAssessment: ViewObservationAnomalyAssessmentModel | null): string {
     if (!aiAssessment) {
-      return 'No ML anomaly result or generative explanation available.';
+      return 'No AI assessments available for this station. Rule-based QC results are shown.';
     }
 
     if (aiAssessment.generativeExplanation?.summary) {
@@ -1021,7 +1056,7 @@ export class QCAssessmentComponent implements OnDestroy {
     for (let page = 0; page < maxPages; page++) {
       const result = await firstValueFrom(this.lmsAiService.qcAssessments({ ...lmsQuery, limit: pageSize, offset }).pipe(take(1)));
       if (result.errorMessage) {
-        this.lmsReviewWarningMessage = 'LMS-trained AI assessment rows could not be loaded. Existing QC records are still available.';
+        this.reviewQueryErrorMessage = result.errorMessage;
         console.warn('[QC Review Workspace] LMS review rows unavailable', result.errorMessage);
         return rows;
       }
@@ -1050,6 +1085,8 @@ export class QCAssessmentComponent implements OnDestroy {
     const lmsQuery: LmsAiQuery = {
       stationIds: query.stationIds && query.stationIds.length > 0 ? query.stationIds : undefined,
       elementCodes: elementCodes.length > 0 ? elementCodes : undefined,
+      interval: query.intervals?.length === 1 ? query.intervals[0] : undefined,
+      sourceId: query.sourceIds?.length === 1 ? query.sourceIds[0] : undefined,
       dateFrom: query.fromDate,
       dateTo: query.toDate,
     };

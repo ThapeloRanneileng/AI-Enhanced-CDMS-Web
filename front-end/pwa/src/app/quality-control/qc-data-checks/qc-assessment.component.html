@@ -90,7 +90,13 @@
                         <div *ngIf="loadingAiContext" class="small text-muted mb-2">
                             Loading ML anomaly results and generative review assistance for the current review page...
                         </div>
-                        <div class="alert alert-warning py-2 mb-2" *ngIf="lmsReviewWarningMessage">
+                        <div class="alert alert-danger py-2 mb-2" *ngIf="!loadingAiContext && reviewQueryErrorMessage">
+                            {{ reviewQueryErrorMessage }}
+                        </div>
+                        <div class="small text-muted mb-2" *ngIf="!loadingAiContext && reviewQueryCompleted && filteredReviewItems.length === 0 && !reviewQueryErrorMessage">
+                            Review query completed. No matching QC review records were found for the selected filters.
+                        </div>
+                        <div class="alert alert-info py-2 mb-2" *ngIf="lmsReviewWarningMessage">
                             {{ lmsReviewWarningMessage }}
                         </div>
                         <div class="small text-muted mb-2">
@@ -169,8 +175,7 @@
                                         <td colspan="11" class="py-4">
                                             <div class="qc-empty-state">
                                                 <div class="qc-empty-icon">Q</div>
-                                                <div class="fw-semibold">No QC review records found for the selected filters.</div>
-                                                <div class="small text-muted">{{ emptyWorkspaceMessage }}</div>
+                                                <div class="fw-semibold">{{ emptyWorkspaceMessage }}</div>
                                             </div>
                                         </td>
                                     </tr>

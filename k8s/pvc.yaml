@@ -1,0 +1,18 @@
+# PersistentVolumeClaim for LMS AI pipeline outputs and shared data.
+# Mounted by both the NestJS API (/app/data) and the lms-ai-pipeline CronJob (/app/data).
+# Uses the OpenStack Cinder CSI driver — requires the cinder-csi StorageClass to exist
+# in your Magnum cluster (present by default on OpenStack Magnum ≥ Yoga).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: climate-data-pvc
+  namespace: climate-ai
+  labels:
+    app.kubernetes.io/part-of: climsoft-web
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: cinder-csi
+  resources:
+    requests:
+      storage: 50Gi

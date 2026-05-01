@@ -16,7 +16,7 @@ export interface ObservationsSavedEvent {
 export class ObservationEventUtils {
   public static mapEntityKey(observation: Pick<ObservationEntity, "stationId" | "elementId" | "level" | "datetime" | "interval" | "sourceId">): ObservationPrimaryKey {
     return {
-      stationId: observation.stationId,
+      stationId: observation.stationId.trim(),
       elementId: observation.elementId,
       level: observation.level,
       datetime: observation.datetime,
@@ -30,7 +30,7 @@ export class ObservationEventUtils {
 
     for (const observationKey of observationKeys) {
       const key = [
-        observationKey.stationId,
+        observationKey.stationId.trim(),
         observationKey.elementId,
         observationKey.level,
         observationKey.datetime.toISOString(),

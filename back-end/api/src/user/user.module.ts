@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { UsersService } from './services/users.service';
 import { UsersController } from './controllers/users.controller';
 import { UserEntity } from './entities/user.entity';
@@ -10,11 +10,13 @@ import { AuthGuard } from './guards/auth.guard';
 import { UserGroupEntity } from './entities/user-group.entity';
 import { UserGroupsService } from './services/user-groups.service';
 import { UserGroupsController } from './controllers/user-groups.controller';
+import { AuditModule } from 'src/audit/audit.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([UserGroupEntity, UserEntity]),
     SharedModule,
+    forwardRef(() => AuditModule),
   ],
   providers: [
     UserGroupsService,

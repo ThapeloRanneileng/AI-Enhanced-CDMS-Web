@@ -35,6 +35,8 @@ export interface ObservationGenerativeExplanation {
   failedQcChecks: string[];
   suggestedReviewerAction: string;
   reviewerGuidance: string;
+  /** GenAI provider that produced the summary, or 'backend_ml_template' for template fallback */
+  provider?: string;
 }
 
 @Entity("observation_anomaly_assessments")

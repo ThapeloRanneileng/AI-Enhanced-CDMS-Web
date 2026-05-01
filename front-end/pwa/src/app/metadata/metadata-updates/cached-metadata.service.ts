@@ -119,7 +119,8 @@ export class CachedMetadataService {
         if (!this._allMetadataLoaded.value) {
             throw new Error(`Developer error: Metadata not full loaded. Stations not usable.`);
         }
-        const metadata = this._stationsMetadata.find(item => item.id === stationId);
+        const trimmedId = stationId.trim();
+        const metadata = this._stationsMetadata.find(item => item.id.trim() === trimmedId);
         if (!metadata) {
             throw new Error(`Developer error: Station not found. ${stationId}`);
         }

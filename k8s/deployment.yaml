@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Deployment A: NestJS backend API (climate-ai-api)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: climate-ai-api
+  namespace: climate-ai
+  labels:
+    app: climate-ai-api
+    app.kubernetes.io/part-of: climsoft-web
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: climate-ai-api
+  template:
+    metadata:
+      labels:
+        app: climate-ai-api
+        tier: backend
+    spec:
+      containers:
+        - name: api
+          image: your-registry/climate-ai-api:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 3000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: climate-ai-config
+            - secretRef:
+                name: climate-secrets
+          volumeMounts:
+            - name: climate-data
+              mountPath: /app/data
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+      volumes:
+        - name: climate-data
+          persistentVolumeClaim:
+            claimName: climate-data-pvc
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Deployment B: Angular/nginx frontend (climate-ai-frontend)
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: climate-ai-frontend
+  namespace: climate-ai
+  labels:
+    app: climate-ai-frontend
+    app.kubernetes.io/part-of: climsoft-web
+    tier: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: climate-ai-frontend
+  template:
+    metadata:
+      labels:
+        app: climate-ai-frontend
+        tier: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: your-registry/climate-ai-frontend:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3

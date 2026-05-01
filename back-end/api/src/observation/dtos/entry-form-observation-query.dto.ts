@@ -3,6 +3,7 @@ import { ArrayNotEmpty, IsDateString, IsInt, IsString } from "class-validator";
 import { StringUtils } from "src/shared/utils/string.utils";
 
 export class EntryFormObservationQueryDto {
+    @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
     @IsString()
     stationId: string;
 

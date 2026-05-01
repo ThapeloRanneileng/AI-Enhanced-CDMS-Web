@@ -55,16 +55,21 @@ export class UsersService implements OnModuleInit {
         return dto;
     }
 
-    public async create(createUserDto: CreateUserDto): Promise<ViewUserDto> {
-        let entity = await this.userRepo.findOneBy({
-            email: createUserDto.email,
-        });
+    // Expose for MigrationsService to refresh the cache after re-encrypting emails.
+    public async reloadCache(): Promise<void> {
+        await this.cache.invalidate();
+    }
 
-        if (entity) {
+    public async create(createUserDto: CreateUserDto): Promise<ViewUserDto> {
+        // Use cache for duplicate check — avoids TypeORM applying to() on the WHERE clause
+        // which would search for the encrypted value against a potentially plaintext DB column.
+        const existing = this.cache.getAll().find(u => u.email === createUserDto.email);
+
+        if (existing) {
             throw new BadRequestException('email exists');
         }
 
-        entity = this.userRepo.create();
+        let entity = this.userRepo.create();
 
         this.updateEntityWithDtoInfo(entity, createUserDto);
 
@@ -130,12 +135,21 @@ export class UsersService implements OnModuleInit {
     }
 
     public async findUserByCredentials(loginCredentials: LogInCredentialsDto): Promise<ViewUserDto> {
-        // Get the user by email
-        const userEntity: UserEntity | null = await this.userRepo.findOneBy(
-            { email: loginCredentials.email }
-        );
+        // Look up by decrypted email from the in-memory cache.
+        // This avoids TypeORM applying the to() transformer to the WHERE clause value,
+        // which would search for the encrypted form and fail to match a plaintext row.
+        // The cache stores decrypted email values regardless of whether the DB row is
+        // already encrypted (from() handles both formats).
+        const cachedUser = this.cache.getAll().find(u => u.email === loginCredentials.email);
 
-        // If user is not found or the password is incorrect, then return an invalid credentials execption.
+        if (!cachedUser) {
+            throw new NotFoundException('invalid_credentials');
+        }
+
+        // Fetch the full entity by ID (ID lookup never touches the email transformer)
+        // to get the hashedPassword for bcrypt comparison.
+        const userEntity = await this.userRepo.findOneBy({ id: cachedUser.id });
+
         if (!userEntity || !await bcrypt.compare(loginCredentials.password, userEntity.hashedPassword)) {
             throw new NotFoundException('invalid_credentials');
         }

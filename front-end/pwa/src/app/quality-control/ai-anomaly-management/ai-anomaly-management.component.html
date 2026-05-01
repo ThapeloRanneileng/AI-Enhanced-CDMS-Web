@@ -10,42 +10,40 @@
     </button>
   </div>
 
-  <div class="summary-grid">
+  <div class="panel loading-panel" *ngIf="isLoadingLmsAi">
+    <div class="panel-title">Loading LMS AI Model & Agent Centre...</div>
+  </div>
+
+  <div class="summary-grid" *ngIf="!isLoadingLmsAi && lmsAiAvailable">
     <div class="summary-card">
-      <span class="summary-label">Total training runs</span>
-      <strong>{{ trainingRuns.length }}</strong>
-      <small>Persisted observation-ai runs</small>
+      <span class="summary-label">Clean rows</span>
+      <strong>{{ formatCount(lmsManifest.totalCleanRows) }}</strong>
+      <small>LMS historical training data</small>
     </div>
     <div class="summary-card">
-      <span class="summary-label">Total trained models</span>
-      <strong>{{ models.length }}</strong>
-      <small>Available model metadata records</small>
+      <span class="summary-label">Prediction rows</span>
+      <strong>{{ formatCount(lmsManifest.totalPredictionRows) }}</strong>
+      <small>LMS-trained model outputs</small>
     </div>
     <div class="summary-card latest-run">
-      <span class="summary-label">Latest training run</span>
-      <strong>{{ latestTrainingRunLabel }}</strong>
-      <small>{{ latestTrainingRunDate }}</small>
-    </div>
-    <div class="summary-card" *ngIf="lmsAiStatus?.available">
-      <span class="summary-label">LMS AI review rows</span>
-      <strong>{{ lmsManifest.qcReviewRows || 0 }}</strong>
+      <span class="summary-label">QC review rows</span>
+      <strong>{{ formatCount(lmsManifest.qcReviewRows) }}</strong>
       <small>{{ lmsManifest.runId }}</small>
     </div>
   </div>
 
-  <div class="panel warning-panel" *ngIf="lmsWarningMessage">
-    <div class="panel-title">LMS AI outputs could not be loaded</div>
-    <p>{{ lmsWarningMessage }}</p>
-    <small>Check that the backend API is running and LMS output files exist. Existing Climsoft anomaly training controls remain available below.</small>
+  <div class="panel warning-panel" *ngIf="!isLoadingLmsAi && !lmsAiAvailable">
+    <div class="panel-title">LMS AI outputs could not be loaded.</div>
+    <p>Check that the backend API is running and the user is logged in.</p>
+    <small *ngIf="lmsAiError">{{ lmsAiError }}</small>
     <div class="actions">
-      <button type="button" class="btn btn-outline-primary btn-sm" (click)="previewLmsDataset()" [disabled]="lmsPreviewLoading">
-        Retry LMS Dataset Preview
+      <button type="button" class="btn btn-outline-primary btn-sm" (click)="retryLmsAi()" [disabled]="isLoadingLmsAi">
+        Retry
       </button>
     </div>
-    <div class="small text-muted mt-2" *ngIf="lmsPreviewErrorMessage">{{ lmsPreviewErrorMessage }}</div>
   </div>
 
-  <div class="panel" *ngIf="lmsAiStatus?.available">
+  <div class="panel" *ngIf="!isLoadingLmsAi && lmsAiAvailable">
     <div class="panel-title">LMS Trained Model Status</div>
     <div class="detail-grid">
       <div class="source-card mini-card"><span class="field-label">Latest run ID</span><strong>{{ lmsManifest.runId }}</strong></div>
@@ -59,6 +57,10 @@
       <div class="source-card mini-card"><span class="field-label">QC review rows</span><strong>{{ formatCount(lmsManifest.qcReviewRows) }}</strong></div>
       <div class="source-card mini-card"><span class="field-label">Model/pipeline version</span><strong>{{ modelVersion }}</strong></div>
       <div class="source-card mini-card"><span class="field-label">GenAI provider used</span><strong>{{ lmsGenAiProvider }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">GenAI requested provider</span><strong>{{ lmsRequestedGenAiProvider }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">GenAI effective provider</span><strong>{{ lmsEffectiveGenAiProvider }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">GenAI configured provider</span><strong>{{ lmsConfiguredGenAiProvider }}</strong></div>
+      <div class="source-card mini-card"><span class="field-label">GenAI status</span><strong>{{ lmsGenAiProviderStatus }}</strong></div>
     </div>
 
     <div class="mt-3">
@@ -150,6 +152,22 @@
         <strong>{{ lmsGenAiProvider }}</strong>
       </div>
       <div class="source-card mini-card">
+        <span class="field-label">Requested provider</span>
+        <strong>{{ lmsRequestedGenAiProvider }}</strong>
+      </div>
+      <div class="source-card mini-card">
+        <span class="field-label">Effective provider</span>
+        <strong>{{ lmsEffectiveGenAiProvider }}</strong>
+      </div>
+      <div class="source-card mini-card">
+        <span class="field-label">Configured provider</span>
+        <strong>{{ lmsConfiguredGenAiProvider }}</strong>
+      </div>
+      <div class="source-card mini-card">
+        <span class="field-label">Status</span>
+        <strong>{{ lmsGenAiProviderStatus }}</strong>
+      </div>
+      <div class="source-card mini-card">
         <span class="field-label">Model insight report</span>
         <strong>{{ lmsAiStatus?.genaiModelSummaryExists ? 'Available' : 'Not generated' }}</strong>
       </div>
@@ -161,6 +179,10 @@
     <div class="source-card" *ngIf="isTemplateGenAiProvider">
       <strong>Template AI provider</strong>
       <small>Template provider was used for local/offline validation. Gemini/Groq can be enabled by setting the provider and API key environment variables.</small>
+    </div>
+    <div class="source-card" *ngIf="lmsGenAiFallbackReason">
+      <strong>GenAI fallback reason</strong>
+      <small>{{ lmsGenAiFallbackReason }}</small>
     </div>
     <div class="source-card" *ngIf="!lmsGenAiSummary?.exists">
       <strong>No GenAI report generated</strong>
@@ -256,7 +278,7 @@
     </div>
   </div>
 
-  <details class="panel legacy-panel" [class.legacy-muted]="lmsHasOutputs">
+  <details class="panel legacy-panel" *ngIf="showLegacyProxyControls" [class.legacy-muted]="lmsHasOutputs">
     <summary class="panel-title">Legacy/proxy training controls</summary>
     <p class="legacy-note" *ngIf="lmsHasOutputs">
       LMS historical outputs are available above. These controls remain for the older proxy training workflow and are not the primary LMS demo evidence.
@@ -307,7 +329,7 @@
     </div>
   </details>
 
-  <div class="grid-two" *ngIf="!lmsHasOutputs">
+  <div class="grid-two" *ngIf="showLegacyProxyControls">
     <div class="panel">
       <div class="panel-title">Proxy Training Sources</div>
       <div class="source-card" *ngFor="let source of proxySources">
@@ -343,7 +365,22 @@
     </div>
   </div>
 
-  <div class="panel">
+  <details class="panel legacy-panel" *ngIf="!isLoadingLmsAi">
+    <summary class="panel-title">Legacy observation-ai training records</summary>
+    <div class="legacy-record-summary">
+      <div class="source-card mini-card">
+        <span class="field-label">Total training runs</span>
+        <strong>{{ trainingRuns.length }}</strong>
+        <small>{{ latestTrainingRunLabel }}</small>
+      </div>
+      <div class="source-card mini-card">
+        <span class="field-label">Total trained models</span>
+        <strong>{{ models.length }}</strong>
+        <small>Persisted observation-ai metadata records</small>
+      </div>
+    </div>
+
+  <div class="panel nested-panel">
     <div class="panel-title">Persisted Training Runs</div>
     <div class="table-wrap">
       <table class="table table-sm table-hover">
@@ -427,4 +464,5 @@
       </div>
     </div>
   </div>
+  </details>
 </section>

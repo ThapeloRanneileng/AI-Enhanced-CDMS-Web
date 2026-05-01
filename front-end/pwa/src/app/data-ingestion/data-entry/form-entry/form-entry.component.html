@@ -80,6 +80,13 @@
           <div class="fw-bold p-1 form-header">Fields</div>
         </div>
 
+        <div *ngIf="noSavedDataFound && refreshLayout" class="alert alert-info mt-2 mx-2 mb-0 small">
+          No saved observations were found for the selected station, source, element, level, interval, and date range.
+          <div class="text-muted mt-1">
+            Active filters: Station <strong>{{ station.id }}</strong> &middot; Source <strong>{{ source.name }}</strong> &middot; Interval <strong>{{ formDefinitions.formMetadata.interval }}</strong>
+          </div>
+        </div>
+
         <div class="mt-2 mx-2">
           <!-- linear layout -->
           <div *ngIf="formDefinitions.formMetadata.layout === 'LINEAR'">

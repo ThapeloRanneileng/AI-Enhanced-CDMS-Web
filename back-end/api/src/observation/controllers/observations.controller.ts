@@ -21,6 +21,7 @@ import { DataFlowQueryDto } from '../dtos/data-flow-query.dto';
 import { QCStatusEnum } from '../enums/qc-status.enum';
 import { DataAvailabilityDetailsQueryDto } from '../dtos/data-availability-details-query.dto';
 import { ImportObservationDataDto, ObservationDataImportResultDto } from '../dtos/import-observation-data.dto';
+import { AuditService } from 'src/audit/audit.service';
 
 @Controller('observations')
 export class ObservationsController {
@@ -29,6 +30,7 @@ export class ObservationsController {
     private observationImportService: ObservationImportService,
     private observationExportsService: ObservationsExportService,
     private dataEntryCheckService: DataEntryAndCorrectionCheckService,
+    private auditService: AuditService,
   ) { }
 
   @Get()
@@ -101,16 +103,19 @@ export class ObservationsController {
   async bulkPut(
     @Req() request: Request,
     @Body(new ParseArrayPipe({ items: CreateObservationDto })) observationDtos: CreateObservationDto[]) {
-    // Get logged in user
     const user = AuthUtil.getLoggedInUser(request);
-
-    // Validate form data. If any invalid bad request will be thrown
     await this.dataEntryCheckService.checkData(observationDtos, user, 'data-entry');
-
-    // Save the data
     await this.observationsService.bulkPut(observationDtos, user.id);
-
-    // // TODO. deprecate the JSON below and just return http success - http 200
+    const stationIds = [...new Set(observationDtos.map(o => o.stationId))];
+    this.auditService.log({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'CREATE',
+      resourceType: 'observation',
+      resourceId: stationIds.join(','),
+      newValue: { count: observationDtos.length, stationIds },
+      ipAddress: request.ip,
+    });
     return { message: "success" };
   }
 

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ObservationsController } from './controllers/observations.controller';
 import { ObservationsService } from './services/observations.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -6,6 +6,7 @@ import { ObservationEntity } from './entities/observation.entity';
 import { ObservationImportService } from './services/observations-import.service';
 import { MetadataModule } from 'src/metadata/metadata.module';
 import { UserModule } from 'src/user/user.module';
+import { AuditModule } from 'src/audit/audit.module';
 import { QualityControlController } from './controllers/quality-control.controller';
 import { QCTestAssessmentsService } from './services/qc-test-assessments.service';
 import { SharedModule } from 'src/shared/shared.module';
@@ -27,6 +28,7 @@ import { ImportPreviewController } from './controllers/import-preview.controller
     UserModule,
     MetadataModule,
     SettingsModule,
+    forwardRef(() => AuditModule),
   ],
   controllers: [
     ObservationsController,

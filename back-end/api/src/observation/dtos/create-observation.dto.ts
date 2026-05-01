@@ -1,7 +1,9 @@
+import { Transform } from 'class-transformer';
 import { IsDateString, IsEnum, IsInt, IsNumber, IsString, ValidateIf } from 'class-validator';
 import { FlagEnum } from '../enums/flag.enum'; 
 
 export class CreateObservationDto {
+    @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
     @IsString()
     stationId: string;
 

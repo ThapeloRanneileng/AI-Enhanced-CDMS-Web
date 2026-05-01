@@ -22,6 +22,7 @@ export class ObservationGenerativeReviewAssistanceService {
       failedQcChecks,
       suggestedReviewerAction: this.buildSuggestedAction(detectionResult.outcome, failedQcChecks.length > 0),
       reviewerGuidance: this.buildReviewerGuidance(detectionResult.outcome, failedQcChecks),
+      provider: 'backend_ml_template',
     };
   }
 

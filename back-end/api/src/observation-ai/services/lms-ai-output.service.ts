@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import * as readline from 'node:readline';
 
 export interface LmsAiQuery {
   stationId?: string;
@@ -9,8 +10,12 @@ export interface LmsAiQuery {
   elementCode?: string;
   elementCodes?: string[];
   elementName?: string;
+  interval?: number;
+  sourceId?: number;
   dateFrom?: string;
   dateTo?: string;
+  fromDate?: string;
+  toDate?: string;
   outcome?: string;
   finalDecision?: string;
   severity?: string;
@@ -68,7 +73,11 @@ export class LmsAiOutputService {
       manifest: manifest.data ?? null,
       modelSummary: modelSummary.data ?? null,
       autoencoderStatus: autoencoderStatus.rows[0] ?? null,
-      genaiProvider: manifest.data?.genaiProvider ?? null,
+      genaiProvider: this.getEffectiveGenAiProvider(manifest.data),
+      requestedGenaiProvider: manifest.data?.requestedGenaiProvider ?? manifest.data?.genaiProvider ?? null,
+      effectiveGenaiProvider: this.getEffectiveGenAiProvider(manifest.data),
+      genaiProviderStatus: manifest.data?.genaiProviderStatus ?? null,
+      genaiFallbackReason: manifest.data?.genaiFallbackReason ?? null,
       genaiModelSummaryExists: this.getFileInfo(this.knownFiles.genaiModelSummary).exists,
       genaiReviewerExplanationsExists: this.getFileInfo(this.knownFiles.genaiReviewerExplanations).exists,
       genaiReportFiles: [
@@ -100,7 +109,11 @@ export class LmsAiOutputService {
     const manifest = this.readJson(this.knownFiles.manifest);
     return {
       ...report,
-      provider: this.getGenAiProvider(report.content, manifest.data?.genaiProvider),
+      provider: this.getGenAiProvider(report.content, this.getEffectiveGenAiProvider(manifest.data) ?? undefined),
+      requestedProvider: manifest.data?.requestedGenaiProvider ?? manifest.data?.genaiProvider ?? null,
+      effectiveProvider: this.getEffectiveGenAiProvider(manifest.data),
+      status: manifest.data?.genaiProviderStatus ?? null,
+      fallbackReason: manifest.data?.genaiFallbackReason ?? null,
       sections: this.parseMarkdownSections(report.content),
     };
   }
@@ -109,31 +122,34 @@ export class LmsAiOutputService {
     return this.queryCsv(this.knownFiles.qcReview, query);
   }
 
-  public getQcAssessments(query: LmsAiQuery) {
-    const handoff = this.readCsv(this.knownFiles.qcReview);
-    const ensemble = this.readCsv(this.knownFiles.ensemble);
-    const explanations = this.readCsv(this.knownFiles.genaiReviewerExplanations);
+  public async getQcAssessments(query: LmsAiQuery) {
     const manifest = this.readJson(this.knownFiles.manifest);
-    const provider = this.normalizeProvider(manifest.data?.genaiProvider);
-    const explanationMap = new Map<string, Record<string, string>>();
-    for (const row of explanations.rows) {
-      explanationMap.set(this.getAssessmentJoinKey(row), row);
+    const provider = this.normalizeProvider(this.getEffectiveGenAiProvider(manifest.data));
+    const assessmentRows = await this.queryAssessmentRows(query);
+    const explanationMap = await this.queryExplanationRowsForKeys(
+      new Set(assessmentRows.rows.map(row => this.getAssessmentJoinKey(row))),
+    );
+    const seenAssessmentKeys = new Set<string>();
+    const rows: Record<string, string>[] = [];
+    for (const row of assessmentRows.rows) {
+      const assessmentKey = this.getAssessmentJoinKey(row);
+      if (seenAssessmentKeys.has(assessmentKey)) continue;
+      seenAssessmentKeys.add(assessmentKey);
+      rows.push(this.withAssessmentFields(row, explanationMap.get(assessmentKey), provider));
     }
 
-    const mergedRows = [...handoff.rows, ...ensemble.rows]
-      .map(row => this.withAssessmentFields(row, explanationMap.get(this.getAssessmentJoinKey(row)), provider))
-      .filter((row, index, rows) => rows.findIndex(candidate => this.getAssessmentJoinKey(candidate) === this.getAssessmentJoinKey(row)) === index);
-
-    const filteredRows = this.filterRows(mergedRows, query);
     return {
-      ...this.pageRows(filteredRows, query),
+      total: assessmentRows.total,
+      limit: assessmentRows.limit,
+      offset: assessmentRows.offset,
+      rows,
       provider,
       evidenceFiles: [
         this.getFileInfo(this.knownFiles.qcReview),
         this.getFileInfo(this.knownFiles.ensemble),
         this.getFileInfo(this.knownFiles.genaiReviewerExplanations),
       ],
-      missing: !handoff.exists && !ensemble.exists,
+      missing: assessmentRows.missing,
     };
   }
 
@@ -141,8 +157,24 @@ export class LmsAiOutputService {
     return this.queryCsv(this.knownFiles.ensemble, query);
   }
 
-  public getNormalizedObservations(query: LmsAiQuery) {
-    return this.queryCsv(this.knownFiles.normalized, query);
+  public async getNormalizedObservations(query: LmsAiQuery) {
+    try {
+      return await this.queryLargeCsvPreview(this.knownFiles.normalized, query);
+    } catch (err) {
+      console.error('[LMS AI] Failed to stream normalized observations preview', err);
+      return {
+        total: 0,
+        matchedCountScanned: 0,
+        totalApproximate: 0,
+        scannedRows: 0,
+        limit: this.getPreviewLimit(query),
+        offset: this.getOffset(query),
+        rows: [],
+        file: this.getFileInfo(this.knownFiles.normalized),
+        missing: false,
+        errorMessage: err instanceof Error ? err.message : 'Failed to read LMS normalized observations preview.',
+      };
+    }
   }
 
   public getRejectedRecords(query: LmsAiQuery) {
@@ -167,14 +199,14 @@ export class LmsAiOutputService {
     return this.queryCsv(this.knownFiles.genaiReviewerExplanations, query);
   }
 
-  public getAgentInsights(query: LmsAiQuery) {
+  public async getAgentInsights(query: LmsAiQuery) {
     const prompt = `${query.prompt ?? 'model performance'}`.toLowerCase();
     const manifest = this.readJson(this.knownFiles.manifest);
     const modelSummary = this.readJson(this.knownFiles.modelSummary);
     const genAiSummary = this.getGenAiSummary();
     const supervisor = this.readMarkdown(this.knownFiles.supervisorSummary);
-    const handoff = this.getQcAssessments({ ...query, limit: query.limit ?? 50, offset: 0 });
-    const provider = this.normalizeProvider(genAiSummary.provider ?? manifest.data?.genaiProvider);
+    const handoff = await this.getQcAssessments({ ...query, limit: query.limit ?? 50, offset: 0 });
+    const provider = this.normalizeProvider(genAiSummary.provider ?? this.getEffectiveGenAiProvider(manifest.data));
     const modelMetrics = modelSummary.data?.modelMetrics ?? {};
     const topStations = [...(modelSummary.data?.stationAnomalyRates ?? [])]
       .sort((left, right) => Number(right.anomalyRate) - Number(left.anomalyRate))
@@ -241,6 +273,192 @@ export class LmsAiOutputService {
     };
   }
 
+  private async queryLargeCsvPreview(file: KnownFile, query: LmsAiQuery) {
+    const filePath = this.getFilePath(file);
+    const fileInfo = this.getFileInfo(file);
+    const offset = this.getOffset(query);
+    const limit = this.getPreviewLimit(query);
+    const rows: Record<string, string>[] = [];
+    let matchedCountScanned = 0;
+    let scannedRows = 0;
+    let headers: string[] = [];
+
+    if (!fs.existsSync(filePath)) {
+      return {
+        total: 0,
+        matchedCountScanned: 0,
+        totalApproximate: 0,
+        scannedRows: 0,
+        limit,
+        offset,
+        rows,
+        file: fileInfo,
+        missing: true,
+      };
+    }
+
+    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
+
+    try {
+      for await (const line of reader) {
+        if (!line) continue;
+        if (headers.length === 0) {
+          headers = this.parseCsvLine(line.replace(/^\uFEFF/, ''));
+          continue;
+        }
+
+        scannedRows++;
+        const values = this.parseCsvLine(line);
+        const row = this.withDerivedObservationDateFields(headers.reduce<Record<string, string>>((accumulator, header, index) => {
+          accumulator[header] = values[index] ?? '';
+          return accumulator;
+        }, {}));
+
+        if (!this.matchesNormalizedPreviewRow(row, query)) {
+          continue;
+        }
+
+        matchedCountScanned++;
+        if (matchedCountScanned <= offset) {
+          continue;
+        }
+
+        rows.push(row);
+        if (rows.length >= limit) {
+          reader.close();
+          stream.destroy();
+          break;
+        }
+      }
+    } finally {
+      reader.close();
+      stream.destroy();
+    }
+
+    return {
+      total: matchedCountScanned,
+      matchedCountScanned,
+      totalApproximate: matchedCountScanned,
+      scannedRows,
+      limit,
+      offset,
+      rows,
+      file: fileInfo,
+      missing: false,
+    };
+  }
+
+  private async queryAssessmentRows(query: LmsAiQuery): Promise<{ total: number; limit: number; offset: number; rows: Record<string, string>[]; missing: boolean }> {
+    const offset = this.getOffset(query);
+    const limit = this.getPageLimit(query);
+    const rows: Record<string, string>[] = [];
+    const seenAssessmentKeys = new Set<string>();
+    let total = 0;
+    let existingFiles = 0;
+
+    for (const file of [this.knownFiles.qcReview, this.knownFiles.ensemble]) {
+      const filePath = this.getFilePath(file);
+      if (!fs.existsSync(filePath)) continue;
+      existingFiles++;
+
+      const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+      const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
+      let headers: string[] = [];
+
+      try {
+        for await (const line of reader) {
+          if (!line) continue;
+          if (headers.length === 0) {
+            headers = this.parseCsvLine(line.replace(/^\uFEFF/, ''));
+            continue;
+          }
+
+          const values = this.parseCsvLine(line);
+          const row = this.withDerivedObservationDateFields(headers.reduce<Record<string, string>>((accumulator, header, index) => {
+            accumulator[header] = values[index] ?? '';
+            return accumulator;
+          }, {}));
+
+          if (!this.matchesAssessmentRow(row, query)) continue;
+
+          const assessmentKey = this.getAssessmentJoinKey(row);
+          if (seenAssessmentKeys.has(assessmentKey)) continue;
+          seenAssessmentKeys.add(assessmentKey);
+
+          if (total >= offset && rows.length < limit) {
+            rows.push(row);
+          }
+          total++;
+        }
+      } finally {
+        reader.close();
+        stream.destroy();
+      }
+    }
+
+    return {
+      total,
+      limit,
+      offset,
+      rows,
+      missing: existingFiles === 0,
+    };
+  }
+
+  private async queryExplanationRowsForKeys(joinKeys: Set<string>): Promise<Map<string, Record<string, string>>> {
+    const explanationMap = new Map<string, Record<string, string>>();
+    if (joinKeys.size === 0) return explanationMap;
+
+    const filePath = this.getFilePath(this.knownFiles.genaiReviewerExplanations);
+    if (!fs.existsSync(filePath)) return explanationMap;
+
+    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
+    const reader = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    let headers: string[] = [];
+
+    try {
+      for await (const line of reader) {
+        if (!line) continue;
+        if (headers.length === 0) {
+          headers = this.parseCsvLine(line.replace(/^\uFEFF/, ''));
+          continue;
+        }
+
+        const values = this.parseCsvLine(line);
+        const row = this.withDerivedObservationDateFields(headers.reduce<Record<string, string>>((accumulator, header, index) => {
+          accumulator[header] = values[index] ?? '';
+          return accumulator;
+        }, {}));
+        const joinKey = this.getAssessmentJoinKey(row);
+        if (joinKeys.has(joinKey)) {
+          explanationMap.set(joinKey, row);
+        }
+      }
+    } finally {
+      reader.close();
+      stream.destroy();
+    }
+
+    return explanationMap;
+  }
+
+  private matchesNormalizedPreviewRow(row: Record<string, string>, query: LmsAiQuery): boolean {
+    return this.matchesStation(row, query)
+      && this.matchesText(row, 'stationName', query.stationName)
+      && this.matchesElementCode(row, query)
+      && this.matchesText(row, 'elementName', query.elementName)
+      && this.matchesDate(row, query);
+  }
+
+  private getOffset(query: LmsAiQuery): number {
+    return Math.max(0, Number(query.offset ?? 0) || 0);
+  }
+
+  private getPreviewLimit(query: LmsAiQuery): number {
+    return Math.min(500, Math.max(1, Number(query.limit ?? 50) || 50));
+  }
+
   private withAssessmentFields(row: Record<string, string>, explanationRow: Record<string, string> | undefined, provider: string): Record<string, string> {
     const explanation = explanationRow?.explanation || row.explanation || row.reviewReason || '';
     return {
@@ -301,6 +519,10 @@ export class LmsAiOutputService {
     return provider?.toString() || 'Template fallback';
   }
 
+  private getEffectiveGenAiProvider(manifest: any): string | null {
+    return manifest?.effectiveGenaiProvider ?? manifest?.genaiProvider ?? null;
+  }
+
   private formatNumber(value: any): string {
     const number = Number(value);
     return Number.isFinite(number) ? number.toLocaleString() : '0';
@@ -312,7 +534,7 @@ export class LmsAiOutputService {
 
   private pageRows(rows: Record<string, string>[], query: LmsAiQuery) {
     const offset = Math.max(0, Number(query.offset ?? 0) || 0);
-    const limit = Math.min(5000, Math.max(1, Number(query.limit ?? 100) || 100));
+    const limit = this.getPageLimit(query);
     return {
       total: rows.length,
       limit,
@@ -321,32 +543,41 @@ export class LmsAiOutputService {
     };
   }
 
+  private getPageLimit(query: LmsAiQuery): number {
+    return Math.min(5000, Math.max(1, Number(query.limit ?? 100) || 100));
+  }
+
   private filterRows(rows: Record<string, string>[], query: LmsAiQuery): Record<string, string>[] {
-    return rows.filter(row => {
-      return this.matchesStation(row, query)
-        && this.matchesText(row, 'stationName', query.stationName)
-        && this.matchesElementCode(row, query)
-        && this.matchesText(row, 'elementName', query.elementName)
-        && this.matchesText(row, 'outcome', query.outcome)
-        && this.matchesText(row, 'finalDecision', query.finalDecision)
-        && this.matchesText(row, 'severity', query.severity)
-        && this.matchesText(row, 'reviewSource', query.reviewSource)
-        && this.matchesText(row, 'modelName', query.modelName)
-        && this.matchesDate(row, query);
-    });
+    return rows.filter(row => this.matchesAssessmentRow(row, query));
+  }
+
+  private matchesAssessmentRow(row: Record<string, string>, query: LmsAiQuery): boolean {
+    return this.matchesStation(row, query)
+      && this.matchesText(row, 'stationName', query.stationName)
+      && this.matchesElementCode(row, query)
+      && this.matchesText(row, 'elementName', query.elementName)
+      && this.matchesOptionalNumericField(row, 'interval', query.interval)
+      && this.matchesOptionalNumericField(row, 'sourceId', query.sourceId)
+      && this.matchesText(row, 'outcome', query.outcome)
+      && this.matchesText(row, 'finalDecision', query.finalDecision)
+      && this.matchesText(row, 'severity', query.severity)
+      && this.matchesText(row, 'reviewSource', query.reviewSource)
+      && this.matchesText(row, 'modelName', query.modelName)
+      && this.matchesDate(row, query);
   }
 
   private matchesStation(row: Record<string, string>, query: LmsAiQuery): boolean {
-    const stationIds = query.stationIds ?? [];
+    const rowStationId = `${row.stationId ?? ''}`.trim();
+    const stationIds = (query.stationIds ?? []).map(stationId => stationId.trim()).filter(Boolean);
+    const stationId = query.stationId?.trim();
     if (stationIds.length > 0) {
-      return stationIds.includes(row.stationId) && this.matchesText(row, 'stationId', query.stationId);
+      return stationIds.includes(rowStationId) && this.textMatches(rowStationId, stationId);
     }
-    return this.matchesText(row, 'stationId', query.stationId);
+    return this.textMatches(rowStationId, stationId);
   }
 
   private matchesText(row: Record<string, string>, field: string, expected?: string): boolean {
-    if (!expected) return true;
-    return `${row[field] ?? ''}`.toLowerCase().includes(expected.toLowerCase());
+    return this.textMatches(row[field], expected);
   }
 
   private matchesElementCode(row: Record<string, string>, query: LmsAiQuery): boolean {
@@ -357,16 +588,25 @@ export class LmsAiOutputService {
     return this.matchesText(row, 'elementCode', query.elementCode);
   }
 
-  private textMatches(actual: string | undefined, expected: string): boolean {
-    return `${actual ?? ''}`.toLowerCase().includes(expected.toLowerCase());
+  private textMatches(actual: string | undefined, expected?: string): boolean {
+    if (!expected) return true;
+    return `${actual ?? ''}`.trim().toLowerCase().includes(expected.trim().toLowerCase());
+  }
+
+  private matchesOptionalNumericField(row: Record<string, string>, field: string, expected?: number): boolean {
+    if (expected === undefined) return true;
+    if (row[field] === undefined || row[field] === '') return true;
+    return Number(row[field]) === expected;
   }
 
   private matchesDate(row: Record<string, string>, query: LmsAiQuery): boolean {
-    if (!query.dateFrom && !query.dateTo) return true;
+    const dateFrom = query.dateFrom ?? query.fromDate;
+    const dateTo = query.dateTo ?? query.toDate;
+    if (!dateFrom && !dateTo) return true;
     const observedDate = this.getComparableDate(row);
     if (!observedDate) return false;
-    if (query.dateFrom && observedDate < this.normalizeQueryDate(query.dateFrom)) return false;
-    if (query.dateTo && observedDate > this.normalizeQueryDate(query.dateTo)) return false;
+    if (dateFrom && observedDate < this.normalizeQueryDate(dateFrom)) return false;
+    if (dateTo && observedDate > this.normalizeQueryDate(dateTo)) return false;
     return true;
   }
 

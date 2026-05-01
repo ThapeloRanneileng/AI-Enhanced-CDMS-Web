@@ -326,7 +326,7 @@ export class FormEntryDefinition {
 
     private createEmptyObservation(): ViewObservationModel {
         return {
-            stationId: this.station.id,
+            stationId: this.station.id.trim(),
             sourceId: this.source.id,
             elementId: 0,
             level: 0,
@@ -355,9 +355,8 @@ export class FormEntryDefinition {
 
     private findEquivalentDBObservation(newObs: ViewObservationModel, dbObservations: ViewObservationModel[]): ViewObservationModel | null {
         for (const dbObservation of dbObservations) {
-            // Look for the observation element id and date time.
             if (
-                newObs.stationId === dbObservation.stationId &&
+                newObs.stationId.trim() === dbObservation.stationId.trim() &&
                 newObs.elementId === dbObservation.elementId &&
                 newObs.sourceId === dbObservation.sourceId &&
                 newObs.level === dbObservation.level &&

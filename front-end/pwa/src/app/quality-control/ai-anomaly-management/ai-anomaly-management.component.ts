@@ -1,5 +1,5 @@
-import { Component, OnInit } from '@angular/core';
-import { forkJoin, take } from 'rxjs';
+import { Component, OnDestroy, OnInit } from '@angular/core';
+import { catchError, forkJoin, of, Subscription, take } from 'rxjs';
 import { PagesDataService, ToastEventTypeEnum } from 'src/app/core/services/pages-data.service';
 import { ViewObservationAnomalyAssessmentModel } from '../models/view-observation-anomaly-assessment.model';
 import { ObservationAnomalyAssessmentsService } from '../services/observation-anomaly-assessments.service';
@@ -30,7 +30,8 @@ interface LmsModelCard {
   templateUrl: './ai-anomaly-management.component.html',
   styleUrls: ['./ai-anomaly-management.component.scss']
 })
-export class AiAnomalyManagementComponent implements OnInit {
+export class AiAnomalyManagementComponent implements OnInit, OnDestroy {
+  private lmsAiLoadSub: Subscription | null = null;
   protected selectedStationIds: string[] = [];
   protected selectedElementCodes: string[] = ['TEMP', 'RH', 'PRES', 'RN', 'WS', 'WD'];
   protected selectedIntervals: number[] = [60, 1440];
@@ -54,6 +55,10 @@ export class AiAnomalyManagementComponent implements OnInit {
   protected latestScoring: ViewObservationAnomalyAssessmentModel | null = null;
   protected latestScoringState: 'idle' | 'loading' | 'ready' | 'empty' | 'error' = 'idle';
   protected latestScoringMessage = 'Select a model to view its latest shared anomaly scoring result.';
+  protected isLoadingLmsAi = true;
+  protected lmsAiAvailable = false;
+  protected lmsAiError = '';
+  protected showLegacyProxyControls = false;
   protected lmsAiStatus: LmsAiStatus | null = null;
   protected lmsSupervisorSummary = '';
   protected lmsSupervisorSummarySections: SupervisorSummarySection[] = [];
@@ -103,6 +108,10 @@ export class AiAnomalyManagementComponent implements OnInit {
     this.refreshLists();
   }
 
+  ngOnDestroy(): void {
+    this.lmsAiLoadSub?.unsubscribe();
+  }
+
   protected previewDataset(): void {
     if (this.lmsAiStatus?.available) {
       this.previewLmsDataset();
@@ -134,38 +143,87 @@ export class AiAnomalyManagementComponent implements OnInit {
   }
 
   protected refreshLists(): void {
-    forkJoin({
-      proxySources: this.observationAiTrainingService.listProxySources(),
-      trainingRuns: this.observationAiTrainingService.listTrainingRuns(),
-      models: this.observationAiTrainingService.listModels(),
+    this.loadLmsAiCentre();
+    this.loadLegacyObservationAiRecords();
+  }
+
+  protected retryLmsAi(): void {
+    this.loadLmsAiCentre();
+  }
+
+  private loadLmsAiCentre(): void {
+    this.lmsAiLoadSub?.unsubscribe();
+    this.isLoadingLmsAi = true;
+    this.loading = true;
+    this.lmsAiAvailable = false;
+    this.lmsAiStatus = null;
+    this.lmsAiError = '';
+    this.lmsWarningMessage = '';
+    this.lmsAiLoadSub = forkJoin({
       lmsStatus: this.lmsAiService.status(),
+      lmsManifest: this.lmsAiService.manifest(),
+      lmsModelSummary: this.lmsAiService.modelSummary(),
       lmsSupervisorSummary: this.lmsAiService.supervisorSummary(),
       lmsGenAiSummary: this.lmsAiService.genAiSummary(),
       lmsGenAiReviewerRows: this.lmsAiService.genAiReviewerExplanations({ limit: 5 }),
     }).pipe(take(1)).subscribe({
       next: data => {
-        this.proxySources = data.proxySources;
-        this.trainingRuns = data.trainingRuns;
-        this.models = data.models;
-        this.lmsAiStatus = data.lmsStatus;
-        this.lmsWarningMessage = data.lmsStatus?.errorMessage || '';
+        const manifest = data.lmsStatus?.manifest ?? data.lmsManifest.data ?? null;
+        const modelSummary = data.lmsStatus?.modelSummary ?? data.lmsModelSummary.data ?? null;
+        const lmsAiAvailable = this.hasLmsAiOutputs(data.lmsStatus, data.lmsManifest, data.lmsModelSummary);
+
+        this.lmsAiStatus = {
+          ...data.lmsStatus,
+          available: lmsAiAvailable,
+          manifest,
+          modelSummary,
+        };
+        this.lmsAiAvailable = lmsAiAvailable;
         this.lmsSupervisorSummary = data.lmsSupervisorSummary.content;
         this.lmsSupervisorSummarySections = this.parseSupervisorSummary(data.lmsSupervisorSummary.content);
         this.lmsGenAiSummary = data.lmsGenAiSummary;
         this.lmsGenAiReviewerRows = data.lmsGenAiReviewerRows.rows;
-        if (!this.lmsWarningMessage) {
-          this.lmsWarningMessage = data.lmsSupervisorSummary.errorMessage
-            || data.lmsGenAiSummary.errorMessage
-            || data.lmsGenAiReviewerRows.errorMessage
-            || '';
-        }
         this.lmsReports = (data.lmsStatus?.files ?? [])
           .filter(file => file.exists && ['modelSummary', 'modelSummaryMarkdown', 'supervisorSummary', 'manifest', 'qcReview', 'ensemble', 'genaiModelSummary', 'genaiReviewerExplanations'].includes(file.key))
           .map(file => ({ label: file.key, fileName: file.fileName, exists: file.exists }));
-        this.syncSelectedModel();
-        this.queryAgentInsights(this.lmsAgentPrompt);
+        this.lmsAiError = lmsAiAvailable ? '' : this.getLmsAiLoadError([
+          data.lmsStatus?.errorMessage,
+          data.lmsManifest.errorMessage,
+          data.lmsModelSummary.errorMessage,
+          data.lmsSupervisorSummary.errorMessage,
+          data.lmsGenAiSummary.errorMessage,
+          data.lmsGenAiReviewerRows.errorMessage,
+        ]);
+        this.lmsWarningMessage = this.lmsAiError;
+        if (lmsAiAvailable) {
+          this.queryAgentInsights(this.lmsAgentPrompt);
+        }
       },
-      error: err => this.handleError(err),
+      error: err => {
+        this.lmsAiAvailable = false;
+        this.lmsAiStatus = null;
+        this.lmsAiError = this.getFriendlyLmsError(err);
+        this.lmsWarningMessage = this.lmsAiError;
+        this.isLoadingLmsAi = false;
+        this.loading = false;
+      },
+      complete: () => {
+        this.isLoadingLmsAi = false;
+        this.loading = false;
+      },
+    });
+  }
+
+  private loadLegacyObservationAiRecords(): void {
+    forkJoin({
+      proxySources: this.observationAiTrainingService.listProxySources().pipe(catchError(() => of([] as AnomalyProxySource[]))),
+      trainingRuns: this.observationAiTrainingService.listTrainingRuns().pipe(catchError(() => of([] as AnomalyTrainingRun[]))),
+      models: this.observationAiTrainingService.listModels().pipe(catchError(() => of([] as AnomalyModelMetadata[]))),
+    }).pipe(take(1)).subscribe(data => {
+      this.proxySources = data.proxySources;
+      this.trainingRuns = data.trainingRuns;
+      this.models = data.models;
+      this.syncSelectedModel();
     });
   }
 
@@ -182,6 +240,9 @@ export class AiAnomalyManagementComponent implements OnInit {
       next: result => {
         this.lmsPreviewRows = result.rows;
         this.lmsPreviewErrorMessage = result.errorMessage || '';
+        if (result.errorMessage) {
+          this.lmsPreviewRows = [];
+        }
       },
       complete: () => this.lmsPreviewLoading = false,
     });
@@ -273,7 +334,7 @@ export class AiAnomalyManagementComponent implements OnInit {
   }
 
   protected get lmsHasOutputs(): boolean {
-    return !!this.lmsAiStatus?.available;
+    return this.lmsAiAvailable;
   }
 
   protected get lmsStatusLoaded(): boolean {
@@ -282,10 +343,54 @@ export class AiAnomalyManagementComponent implements OnInit {
 
   protected get lmsGenAiProvider(): string {
     const provider = this.lmsGenAiSummary?.provider
+      || this.lmsGenAiSummary?.effectiveProvider
+      || this.lmsAiStatus?.effectiveGenaiProvider
+      || this.lmsAiStatus?.genaiProvider
+      || this.lmsManifest.effectiveGenaiProvider
+      || this.lmsManifest.genaiProvider
+      || 'Not available';
+    return this.formatProvider(provider);
+  }
+
+  protected get lmsRequestedGenAiProvider(): string {
+    const provider = this.lmsGenAiSummary?.requestedProvider
+      || this.lmsAiStatus?.requestedGenaiProvider
+      || this.lmsManifest.requestedGenaiProvider
+      || this.lmsManifest.genaiProvider
+      || 'Not available';
+    return this.formatProvider(provider);
+  }
+
+  protected get lmsEffectiveGenAiProvider(): string {
+    const provider = this.lmsGenAiSummary?.effectiveProvider
+      || this.lmsAiStatus?.effectiveGenaiProvider
+      || this.lmsManifest.effectiveGenaiProvider
       || this.lmsAiStatus?.genaiProvider
       || this.lmsManifest.genaiProvider
       || 'Not available';
     return this.formatProvider(provider);
+  }
+
+  protected get lmsConfiguredGenAiProvider(): string {
+    const provider = this.lmsAiStatus?.genaiProvider
+      || this.lmsManifest.genaiProvider
+      || this.lmsGenAiSummary?.provider
+      || 'Not available';
+    return this.formatProvider(provider);
+  }
+
+  protected get lmsGenAiProviderStatus(): string {
+    return this.lmsGenAiSummary?.status
+      || this.lmsAiStatus?.genaiProviderStatus
+      || this.lmsManifest.genaiProviderStatus
+      || 'Not available';
+  }
+
+  protected get lmsGenAiFallbackReason(): string {
+    return this.lmsGenAiSummary?.fallbackReason
+      || this.lmsAiStatus?.genaiFallbackReason
+      || this.lmsManifest.genaiFallbackReason
+      || '';
   }
 
   protected get isTemplateGenAiProvider(): boolean {
@@ -422,6 +527,25 @@ export class AiAnomalyManagementComponent implements OnInit {
     if (value.includes('groq')) return 'Groq';
     if (value.includes('template')) return 'Template fallback';
     return provider;
+  }
+
+  private hasLmsAiOutputs(status: LmsAiStatus, manifestResponse: any, modelSummaryResponse: any): boolean {
+    const hasManifest = !!status?.manifest || !!manifestResponse?.data || !!manifestResponse?.exists;
+    const hasModelSummary = !!status?.modelSummary || !!modelSummaryResponse?.data || !!modelSummaryResponse?.exists;
+    const hasOutputFile = (status?.files ?? []).some(file => file.exists && ['manifest', 'modelSummary', 'qcReview', 'ensemble'].includes(file.key));
+    return (!!status?.available && !status?.restricted) || hasManifest || hasModelSummary || hasOutputFile;
+  }
+
+  private getLmsAiLoadError(messages: Array<string | undefined>): string {
+    return messages.find(message => !!message)
+      || 'LMS AI outputs could not be loaded. Check that the backend API is running and the user is logged in.';
+  }
+
+  private getFriendlyLmsError(err: any): string {
+    return err?.error?.message
+      || err?.error?.errorMessage
+      || err?.message
+      || 'LMS AI outputs could not be loaded. Check that the backend API is running and the user is logged in.';
   }
 
   private handleError(err: any): void {

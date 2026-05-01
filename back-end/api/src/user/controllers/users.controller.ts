@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Req, Res, } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto } from '../dtos/create-user.dto';
 import { Request, Response } from 'express';
@@ -7,10 +8,14 @@ import { Public } from '../decorators/public.decorator';
 import { AuthUtil } from '../services/auth.util';
 import { LogInCredentialsDto } from '../dtos/login-credentials.dto';
 import { ChangePasswordDto } from '../dtos/change-password.dto';
+import { AuditService } from 'src/audit/audit.service';
 
 @Controller('users')
 export class UsersController {
-    constructor(private readonly userService: UsersService,) { }
+    constructor(
+        private readonly userService: UsersService,
+        private readonly auditService: AuditService,
+    ) { }
 
     @Admin()
     @Get()
@@ -49,20 +54,42 @@ export class UsersController {
     }
 
     @Public()
+    @Throttle({ default: { limit: 5, ttl: 60000 } })
     @Post('login')
     public async login(
         @Req() request: Request,
         @Body() loginCredentials: LogInCredentialsDto) {
-        return AuthUtil.createNewSessionUser(request, await this.userService.findUserByCredentials(loginCredentials));
+        const user = await this.userService.findUserByCredentials(loginCredentials);
+        const loggedIn = AuthUtil.createNewSessionUser(request, user);
+        this.auditService.log({
+            userId: user.id,
+            userEmail: user.email,
+            action: 'LOGIN',
+            resourceType: 'session',
+            ipAddress: request.ip,
+            userAgent: request.headers['user-agent'],
+        });
+        return loggedIn;
     }
 
     @Post('logout')
     public logout(@Req() req: Request, @Res() res: Response) {
+        const sessionUser = AuthUtil.getSessionUser(req);
+        if (sessionUser) {
+            this.auditService.log({
+                userId: sessionUser.id,
+                userEmail: sessionUser.email,
+                action: 'LOGOUT',
+                resourceType: 'session',
+                ipAddress: req.ip,
+                userAgent: req.headers['user-agent'],
+            });
+        }
         req.session.destroy((err) => {
             if (err) {
                 return res.status(500).send('Failed to destroy session.');
             }
-            res.clearCookie('connect.sid'); // Clears the cookie storing the session ID 
+            res.clearCookie('connect.sid'); // Clears the cookie storing the session ID
             return res.status(200).send(JSON.stringify({ message: 'success' }));
         });
     }

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { UsersService } from 'src/user/services/users.service';
 import { DatabaseVersionEntity } from './entities/database-version.entity';
+import { EncryptionTransformer } from 'src/shared/transformers/encryption.transformer';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ElementSubdomainsService } from 'src/metadata/elements/services/element-subdomains.service';
@@ -20,7 +21,7 @@ import { DataSource } from 'typeorm';
 
 @Injectable()
 export class MigrationsService {
-  private readonly SUPPORTED_DB_VERSION: string = '0.0.7'; // TODO. Should come from a versioning file. 
+  private readonly SUPPORTED_DB_VERSION: string = '0.0.8'; // TODO. Should come from a versioning file.
   private readonly logger = new Logger(MigrationsService.name);
 
   constructor(
@@ -38,6 +39,11 @@ export class MigrationsService {
   ) { }
 
   public async doMigrations() {
+    // Run on every startup — idempotent.  Ensures any plaintext email rows left over
+    // from before the EncryptionTransformer was enabled are normalised to encrypted form.
+    await this.reEncryptPlaintextEmails();
+    await this.normalizeStationIds();
+
     // Get last db version
     const [lastDBVersion] = await this.dbVersionRepo.find({
       order: { id: 'DESC' },
@@ -87,12 +93,175 @@ export class MigrationsService {
   }
 
   private async seedDatabase() {
+    await this.enablePgCrypto();
     await this.seedTriggers();
     await this.seedFirstUser();
     await this.seedMetadata();
     await this.seedGeneralSettings();
     await this.createObservationAnomalyAssessmentsTable();
     await this.createPaperArchivesTable();
+    await this.createAuditLogsTable();
+    await this.createReviewerDecisionsTable();
+  }
+
+  // Idempotent: only touches rows whose email is still stored as plaintext.
+  // Uses raw SQL on both read and write to bypass the TypeORM transformer entirely,
+  // so it works correctly whether DB_ENCRYPTION_KEY is set or not.
+  private async reEncryptPlaintextEmails(): Promise<void> {
+    const transformer = new EncryptionTransformer();
+    const rows: Array<{ id: number; email: string }> = await this.dataSource.query(
+      'SELECT id, email FROM users',
+    );
+
+    let migrated = 0;
+    for (const row of rows) {
+      if (!EncryptionTransformer.isEncrypted(row.email)) {
+        const encrypted = transformer.to(row.email);
+        await this.dataSource.query('UPDATE users SET email = $1 WHERE id = $2', [encrypted, row.id]);
+        migrated++;
+      }
+    }
+
+    if (migrated > 0) {
+      this.logger.log(`Re-encrypted ${migrated} plaintext email row(s)`);
+      // Refresh the in-memory user cache so subsequent requests see decrypted emails.
+      await this.userService.reloadCache();
+    }
+  }
+
+  private async normalizeStationIds(): Promise<void> {
+    const tableRows: Array<{ observations_exists: string | null; anomaly_exists: string | null }> = await this.dataSource.query(`
+      SELECT
+        to_regclass('public.observations') AS observations_exists,
+        to_regclass('public.observation_anomaly_assessments') AS anomaly_exists;
+    `);
+    const observationsExists = !!tableRows[0]?.observations_exists;
+    const anomalyAssessmentsExists = !!tableRows[0]?.anomaly_exists;
+
+    let observationCount = 0;
+    let skippedObservationCount = 0;
+    let anomalyCount = 0;
+
+    if (observationsExists) {
+      const observationRows: Array<{ updated_count: string }> = await this.dataSource.query(`
+        WITH candidates AS (
+          SELECT o.ctid, TRIM(o.station_id) AS normalized_station_id
+          FROM observations o
+          WHERE o.station_id <> TRIM(o.station_id)
+            AND EXISTS (
+              SELECT 1
+              FROM stations station
+              WHERE station.id = TRIM(o.station_id)
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM observations existing
+              WHERE existing.station_id = TRIM(o.station_id)
+                AND existing.element_id = o.element_id
+                AND existing.level = o.level
+                AND existing.date_time = o.date_time
+                AND existing.interval = o.interval
+                AND existing.source_id = o.source_id
+            )
+        ),
+        updated AS (
+          UPDATE observations o
+          SET station_id = candidates.normalized_station_id
+          FROM candidates
+          WHERE o.ctid = candidates.ctid
+          RETURNING 1
+        )
+        SELECT COUNT(*) AS updated_count FROM updated;
+      `);
+
+      const skippedObservationRows: Array<{ skipped_count: string }> = await this.dataSource.query(`
+        SELECT COUNT(*) AS skipped_count
+        FROM observations o
+        WHERE o.station_id <> TRIM(o.station_id);
+      `);
+
+      observationCount = Number(observationRows[0]?.updated_count ?? 0);
+      skippedObservationCount = Number(skippedObservationRows[0]?.skipped_count ?? 0);
+    }
+
+    if (anomalyAssessmentsExists) {
+      const anomalyRows: Array<{ updated_count: string }> = await this.dataSource.query(`
+        WITH updated AS (
+          UPDATE observation_anomaly_assessments
+          SET station_id = TRIM(station_id)
+          WHERE station_id <> TRIM(station_id)
+          RETURNING 1
+        )
+        SELECT COUNT(*) AS updated_count FROM updated;
+      `);
+
+      anomalyCount = Number(anomalyRows[0]?.updated_count ?? 0);
+    }
+
+    if (observationCount > 0 || skippedObservationCount > 0 || anomalyCount > 0) {
+      this.logger.log(`Normalized station IDs: ${observationCount} observation row(s), ${anomalyCount} anomaly assessment row(s). ${skippedObservationCount} observation row(s) still need manual merge because a normalized primary key already exists.`);
+    }
+  }
+
+  private async enablePgCrypto() {
+    await this.dataSource.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto;`);
+    this.logger.log('pgcrypto extension ensured');
+  }
+
+  private async createAuditLogsTable() {
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        "userId" INT NOT NULL,
+        "userEmail" VARCHAR NOT NULL,
+        action VARCHAR NOT NULL,
+        "resourceType" VARCHAR NOT NULL,
+        "resourceId" VARCHAR NULL,
+        "previousValue" JSONB NULL,
+        "newValue" JSONB NULL,
+        "ipAddress" VARCHAR NULL,
+        reason VARCHAR NULL,
+        "userAgent" VARCHAR NULL,
+        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_audit_logs_userId" ON audit_logs ("userId");`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_audit_logs_action" ON audit_logs (action);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_audit_logs_createdAt" ON audit_logs ("createdAt");`);
+    this.logger.log('audit_logs table ensured');
+  }
+
+  private async createReviewerDecisionsTable() {
+    await this.dataSource.query(`
+      CREATE TABLE IF NOT EXISTS reviewer_decisions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        station_id VARCHAR NOT NULL,
+        element_id INT NOT NULL,
+        date_time TIMESTAMPTZ NOT NULL,
+        level INT NOT NULL,
+        interval INT NOT NULL,
+        source_id INT NOT NULL,
+        assessment_id INT NULL,
+        decision VARCHAR NOT NULL,
+        corrected_value DOUBLE PRECISION NULL,
+        reason_code VARCHAR NULL,
+        reason_note TEXT NULL,
+        reviewed_by_user_id INT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        reviewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_station_id" ON reviewer_decisions (station_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_element_id" ON reviewer_decisions (element_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_date_time" ON reviewer_decisions (date_time);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_assessment_id" ON reviewer_decisions (assessment_id);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_decision" ON reviewer_decisions (decision);`);
+    await this.dataSource.query(`CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_reviewed_by_user_id" ON reviewer_decisions (reviewed_by_user_id);`);
+    await this.dataSource.query(`
+      CREATE INDEX IF NOT EXISTS "IDX_reviewer_decisions_lookup"
+      ON reviewer_decisions (station_id, element_id, level, date_time, interval, source_id);
+    `);
+    this.logger.log('reviewer_decisions table ensured');
   }
 
   private async seedTriggers() {

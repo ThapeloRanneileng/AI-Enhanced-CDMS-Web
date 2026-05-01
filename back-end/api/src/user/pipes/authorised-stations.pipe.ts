@@ -53,11 +53,14 @@ export class AuthorisedStationsPipe implements PipeTransform {
         || routePath === '/observation-anomaly-assessments/review-workspace'
         || routePath === '/observation-anomaly-assessments/review-workspace/count'
         || routePath === '/lms-ai/qc-review'
+        || routePath === '/lms-ai/qc-assessments'
+        || routePath === '/lms-ai/assessments'
         || routePath === '/lms-ai/ensemble'
         || routePath === '/lms-ai/normalized-observations'
         || routePath === '/lms-ai/rejected-records'
         || routePath === '/lms-ai/predictions'
         || routePath === '/lms-ai/genai-reviewer-explanations'
+        || routePath === '/lms-ai/agent-insights'
       ) {
         return this.handleQualityControlQueryDTO(value as ViewObservationQueryDTO, user.permissions);
       } else {
@@ -112,6 +115,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private handleStationMetadataEdits(value: string, userPermissions: UserPermissionDto): string {
     if (!userPermissions.stationsMetadataPermissions) throw new BadRequestException('Not authorised to update station');
+    value = value?.trim();
 
     // If allowed to update all stations then just return value
     if (!userPermissions.stationsMetadataPermissions.stationIds) return value;
@@ -125,6 +129,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private handleCreateObservationQueryDto(value: EntryFormObservationQueryDto | CreateObservationDto | DeleteObservationDto, userPermissions: UserPermissionDto): EntryFormObservationQueryDto | CreateObservationDto | DeleteObservationDto {
     if (!userPermissions.entryPermissions) throw new BadRequestException('Not authorised to enter data');
+    if (value?.stationId) value.stationId = value.stationId.trim();
 
     if (!userPermissions.entryPermissions.stationIds) return value;
 
@@ -137,6 +142,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private handleCorrectionViewObservationQueryDTO(value: ViewObservationQueryDTO, userPermissions: UserPermissionDto): ViewObservationQueryDTO {
     if (!value) throw new BadRequestException('Query value must be defined');
+    this.normalizeStationIds(value);
 
     if (!userPermissions.entryPermissions) throw new BadRequestException('Not authorised to enter data');
 
@@ -157,6 +163,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private handleMonitoringViewObservationQueryDTO(value: ViewObservationQueryDTO | StationStatusQueryDto | DataAvailabilitySummaryQueryDto | DataAvailabilityDetailsQueryDto, userPermissions: UserPermissionDto): ViewObservationQueryDTO {
     if (!value) throw new BadRequestException('Query value must be defined');
+    this.normalizeStationIds(value);
 
     if (!userPermissions.ingestionMonitoringPermissions) throw new BadRequestException('Not authorised to monitor data');
 
@@ -176,6 +183,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private handleMonitoringString(value: string, userPermissions: UserPermissionDto): string {
     if (!userPermissions.ingestionMonitoringPermissions) throw new BadRequestException('Not authorised to monitor data');
+    value = value?.trim();
 
     // If allowed to update all stations then just return value
     if (!userPermissions.ingestionMonitoringPermissions.stationIds) return value;
@@ -189,6 +197,7 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
   private handleQualityControlQueryDTO(value: ViewObservationQueryDTO, userPermissions: UserPermissionDto): ViewObservationQueryDTO {
     if (!value) throw new BadRequestException('Query value must be defined');
+    this.normalizeStationIds(value);
 
     if (!userPermissions.qcPermissions) throw new BadRequestException('Not authorised to QC');
 
@@ -234,7 +243,14 @@ export class AuthorisedStationsPipe implements PipeTransform {
 
 
   private allAreAuthorisedStations(requestedIds: string[], authorisedIds: string[]): boolean {
-    return requestedIds.every(id => authorisedIds.includes(id));
+    const normalizedAuthorisedIds = authorisedIds.map(id => id.trim());
+    return requestedIds.map(id => id.trim()).every(id => normalizedAuthorisedIds.includes(id));
+  }
+
+  private normalizeStationIds(value: ViewObservationQueryDTO): void {
+    if (value.stationIds) {
+      value.stationIds = value.stationIds.map(id => id.trim()).filter(id => id.length > 0);
+    }
   }
 
   private isObservationQueryMetatype(metatype: Function): boolean {

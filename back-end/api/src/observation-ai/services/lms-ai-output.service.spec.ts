@@ -26,8 +26,8 @@ describe('LmsAiOutputService', () => {
     jest.restoreAllMocks();
   });
 
-  it('returns safe empty and missing responses when LMS output files do not exist', () => {
-    const normalized = service.getNormalizedObservations({ limit: 25, offset: 5 });
+  it('returns safe empty and missing responses when LMS output files do not exist', async () => {
+    const normalized = await service.getNormalizedObservations({ limit: 25, offset: 5 });
     const rejected = service.getRejectedRecords({});
     const status = service.getStatus();
     const supervisorSummary = service.getSupervisorSummary();
@@ -104,7 +104,7 @@ describe('LmsAiOutputService', () => {
     expect(result.rows.map(row => row.value)).toEqual(['2', '3']);
   });
 
-  it('adds derived year, month, and day fields from observationDatetime', () => {
+  it('adds derived year, month, and day fields from observationDatetime', async () => {
     writeOutputCsv(
       'lms_all_station_training_input_normalized.csv',
       [
@@ -113,7 +113,7 @@ describe('LmsAiOutputService', () => {
       ],
     );
 
-    const result = service.getNormalizedObservations({});
+    const result = await service.getNormalizedObservations({});
 
     expect(result.rows[0]).toMatchObject({
       observationDatetime: '1993-07-05T12:30:00.000Z',
@@ -121,6 +121,68 @@ describe('LmsAiOutputService', () => {
       month: '7',
       day: '5',
     });
+  });
+
+  it('streams normalized observation preview and returns only limited rows', async () => {
+    writeOutputCsv(
+      'lms_all_station_training_input_normalized.csv',
+      [
+        'stationId,stationName,observationDatetime,elementCode,elementName,value,unit',
+        'LES001,Maseru,1967-01-01,rain,Rainfall,1,mm',
+        'LES001,Maseru,1967-01-02,rain,Rainfall,2,mm',
+        'LES001,Maseru,1967-01-03,rain,Rainfall,3,mm',
+      ],
+    );
+
+    const result = await service.getNormalizedObservations({ elementCode: 'rain', limit: 2 });
+
+    expect(result).toMatchObject({
+      total: 2,
+      matchedCountScanned: 2,
+      limit: 2,
+      offset: 0,
+      missing: false,
+    });
+    expect(result.rows.map(row => row.value)).toEqual(['1', '2']);
+  });
+
+  it('filters normalized preview by historical date while stopping after enough matches', async () => {
+    writeOutputCsv(
+      'lms_all_station_training_input_normalized.csv',
+      [
+        'stationId,stationName,observationDatetime,elementCode,elementName,value,unit',
+        'LES001,Maseru,1966-12-31,rain,Rainfall,0,mm',
+        'LES001,Maseru,1967-01-01,rain,Rainfall,1,mm',
+        'LES001,Maseru,1967-01-02,rain,Rainfall,2,mm',
+        'LES001,Maseru,2020-01-01,rain,Rainfall,3,mm',
+        'LES001,Maseru,2020-01-02,rain,Rainfall,4,mm',
+      ],
+    );
+
+    const result = await service.getNormalizedObservations({
+      elementCode: 'rain',
+      dateFrom: '1967-01-01',
+      dateTo: '2019-12-31',
+      limit: 2,
+    });
+
+    expect(result.rows.map(row => row.value)).toEqual(['1', '2']);
+    expect(result.scannedRows).toBe(3);
+  });
+
+  it('clamps normalized preview limit to 500 rows', async () => {
+    writeOutputCsv(
+      'lms_all_station_training_input_normalized.csv',
+      [
+        'stationId,stationName,observationDatetime,elementCode,elementName,value,unit',
+        ...Array.from({ length: 550 }, (_, index) => `LES001,Maseru,1967-01-${String((index % 28) + 1).padStart(2, '0')},rain,Rainfall,${index},mm`),
+      ],
+    );
+
+    const result = await service.getNormalizedObservations({ elementCode: 'rain', limit: 5000 });
+
+    expect(result.limit).toBe(500);
+    expect(result.rows).toHaveLength(500);
   });
 
   it('filters LMS rows to authorised stationIds supplied by the authorization pipe', () => {
@@ -163,6 +225,66 @@ describe('LmsAiOutputService', () => {
     expect(allowedAndMatched.rows[0].stationId).toBe('LES002');
     expect(notAuthorised.total).toBe(0);
     expect(notAuthorised.rows).toEqual([]);
+  });
+
+  it('trims station filters and LMS row station IDs before matching', () => {
+    writeOutputCsv(
+      'lms_qc_review_handoff.csv',
+      [
+        'stationId,observationDatetime,elementCode,value,outcome',
+        ' LESLER01,2026-04-01,rain,1,SUSPECT',
+      ],
+    );
+
+    const result = service.getQcReview({
+      stationIds: [' LESLER01 '],
+      stationId: 'LESLER01',
+      elementCode: 'rain',
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.rows[0].stationId).toBe(' LESLER01');
+  });
+
+  it('accepts sourceId and interval filters without rejecting LMS rows that do not carry those columns', () => {
+    writeOutputCsv(
+      'lms_qc_review_handoff.csv',
+      [
+        'stationId,observationDatetime,elementCode,value,outcome',
+        'LESLER01,2026-04-01,rain,1,SUSPECT',
+      ],
+    );
+
+    const result = service.getQcReview({
+      stationId: 'LESLER01',
+      elementCode: 'rain',
+      sourceId: 4,
+      interval: 1440,
+    });
+
+    expect(result.total).toBe(1);
+  });
+
+  it('applies sourceId and interval filters when LMS rows include those columns', () => {
+    writeOutputCsv(
+      'lms_qc_review_handoff.csv',
+      [
+        'stationId,observationDatetime,elementCode,sourceId,interval,value,outcome',
+        'LESLER01,2026-04-01,rain,4,1440,1,SUSPECT',
+        'LESLER01,2026-04-02,rain,5,1440,2,SUSPECT',
+        'LESLER01,2026-04-03,rain,4,60,3,SUSPECT',
+      ],
+    );
+
+    const result = service.getQcReview({
+      stationId: 'LESLER01',
+      elementCode: 'rain',
+      sourceId: 4,
+      interval: 1440,
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.rows[0].value).toBe('1');
   });
 
   it('returns total, normalized limit, offset, and sliced rows for pagination', () => {
@@ -280,7 +402,7 @@ describe('LmsAiOutputService', () => {
     });
   });
 
-  it('returns LMS-trained QC assessments with merged provider and model evidence', () => {
+  it('returns LMS-trained QC assessments with merged provider and model evidence', async () => {
     fs.writeFileSync(
       path.join(outputDir, 'lms_pipeline_run_manifest.json'),
       JSON.stringify({ genaiProvider: 'template' }),
@@ -301,7 +423,7 @@ describe('LmsAiOutputService', () => {
       ],
     );
 
-    const result = service.getQcAssessments({ stationId: 'LES001', elementCode: 'rain' });
+    const result = await service.getQcAssessments({ stationId: 'LES001', elementCode: 'rain' });
 
     expect(result).toMatchObject({
       total: 1,
@@ -317,7 +439,7 @@ describe('LmsAiOutputService', () => {
     });
   });
 
-  it('returns deterministic agent insights from LMS output summaries', () => {
+  it('returns deterministic agent insights from LMS output summaries', async () => {
     fs.writeFileSync(
       path.join(outputDir, 'lms_pipeline_run_manifest.json'),
       JSON.stringify({
@@ -342,7 +464,7 @@ describe('LmsAiOutputService', () => {
       'utf8',
     );
 
-    const result = service.getAgentInsights({ prompt: 'Summarize highest-risk stations' });
+    const result = await service.getAgentInsights({ prompt: 'Summarize highest-risk stations' });
 
     expect(result.provider).toBe('Template fallback');
     expect(result.answer).toContain('LES001');

@@ -1,0 +1,56 @@
+# Daily LMS AI pipeline job — runs at 02:00 UTC.
+# Reads observation data from PostgreSQL, runs the Random Forest anomaly
+# detection pipeline, and writes outputs to the shared PVC at /app/data.
+# The NestJS API reads those outputs via LmsAiOutputService.
+#
+# Trigger a manual run at any time:
+#   kubectl create job --from=cronjob/lms-ai-pipeline lms-ai-manual-$(date +%s) \
+#     -n climate-ai
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lms-ai-pipeline
+  namespace: climate-ai
+  labels:
+    app: lms-ai-pipeline
+    app.kubernetes.io/part-of: climsoft-web
+    tier: pipeline
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: lms-ai-pipeline
+            tier: pipeline
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: pipeline
+              image: your-registry/climate-ai-pipeline:latest
+              imagePullPolicy: Always
+              envFrom:
+                - configMapRef:
+                    name: climate-ai-config
+                - secretRef:
+                    name: climate-secrets
+              volumeMounts:
+                - name: climate-data
+                  mountPath: /app/data
+              resources:
+                requests:
+                  memory: "2Gi"
+                  cpu: "2000m"
+                limits:
+                  memory: "8Gi"
+                  cpu: "4000m"
+          volumes:
+            - name: climate-data
+              persistentVolumeClaim:
+                claimName: climate-data-pvc

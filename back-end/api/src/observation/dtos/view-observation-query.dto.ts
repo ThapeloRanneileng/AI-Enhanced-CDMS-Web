@@ -5,7 +5,9 @@ import { QCStatusEnum } from "../enums/qc-status.enum";
 
 export class ViewObservationQueryDTO {
     @IsOptional()
-    @Transform(({ value }) => value ? StringUtils.mapCommaSeparatedStringToStringArray(value.toString()) : [])
+    @Transform(({ value }) => value
+        ? StringUtils.mapCommaSeparatedStringToStringArray(value.toString()).map(id => id.trim()).filter(id => id.length > 0)
+        : [])
     @ArrayNotEmpty()
     @IsString({ each: true })
     stationIds?: string[];
